@@ -35,8 +35,10 @@ var listCmd = &cobra.Command{
 
 		for _, s := range sessions {
 			status := "●"
-			if s.Status == index.StatusArchived {
-				status = "◌"
+			if s.Status == index.StatusArchived && s.FileSize == 0 {
+				status = "△"
+			} else if s.Status == index.StatusArchived {
+				status = "○"
 			}
 
 			project := filepath.Base(s.Project)
