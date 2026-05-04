@@ -1,0 +1,54 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/session"
+	"github.com/batrashubham/claudectl/internal/tui"
+)
+
+func runTUI() error {
+	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
+	sessions, err := builder.Build()
+	if err != nil {
+		return fmt.Errorf("build index: %w", err)
+	}
+
+	model := tui.NewModel(cfg, sessions)
+	p := tea.NewProgram(model, tea.WithAltScreen())
+
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	// Check if user wants to resume a session
+	if m, ok := finalModel.(tui.Model); ok {
+		if resumeID := m.ResumeID(); resumeID != "" {
+			var target *index.SessionMeta
+			for i := range sessions {
+				if sessions[i].ID == resumeID {
+					target = &sessions[i]
+					break
+				}
+			}
+			if target == nil {
+				fmt.Fprintf(os.Stderr, "session %s not found\n", resumeID)
+				os.Exit(1)
+			}
+
+			locator := session.NewLocator(cfg.ClaudeDir, cfg.BackupDir)
+			loc := locator.Locate(target.ID, target.ProjectDir)
+			if loc.ActivePath == "" && loc.ArchivedPath == "" {
+				fmt.Fprintf(os.Stderr, "Cannot resume: session file was deleted before backup. Only history metadata remains.\n")
+				os.Exit(1)
+			}
+			return locator.Resume(target.ID, target.ProjectDir, target.Project)
+		}
+	}
+
+	return nil
+}

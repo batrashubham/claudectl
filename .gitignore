@@ -1,0 +1,14 @@
+# Binary
+claudectl
+claude-sessions
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Superpowers brainstorm artifacts
+.superpowers/
