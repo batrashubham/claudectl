@@ -25,7 +25,8 @@ func NewEngine(claudeDir, backupDir string) *Engine {
 }
 
 func (e *Engine) lockPath() string {
-	return filepath.Join(e.backupDir, ".sync.lock")
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claudectl", ".sync.lock")
 }
 
 func (e *Engine) acquireLock() error {
