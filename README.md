@@ -28,11 +28,13 @@ cd claudectl
 go install .
 ```
 
-### Homebrew (coming soon)
+### Install script (recommended)
 
 ```bash
-brew install batrashubham/tap/claudectl
+curl -sSL https://raw.githubusercontent.com/batrashubham/claudectl/main/install.sh | sh
 ```
+
+Downloads the right binary for your OS/arch and installs to `/usr/local/bin`.
 
 ## Quick Start
 
