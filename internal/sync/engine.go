@@ -24,10 +24,37 @@ func NewEngine(claudeDir, backupDir string) *Engine {
 	return &Engine{claudeDir: claudeDir, backupDir: backupDir}
 }
 
+func (e *Engine) lockPath() string {
+	return filepath.Join(e.backupDir, ".sync.lock")
+}
+
+func (e *Engine) acquireLock() error {
+	lockFile := e.lockPath()
+	f, err := os.OpenFile(lockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("sync already in progress (lockfile: %s)", lockFile)
+		}
+		return err
+	}
+	fmt.Fprintf(f, "%d", os.Getpid())
+	f.Close()
+	return nil
+}
+
+func (e *Engine) releaseLock() {
+	os.Remove(e.lockPath())
+}
+
 func (e *Engine) Sync() (*Result, error) {
 	if err := os.MkdirAll(e.backupDir, 0755); err != nil {
 		return nil, fmt.Errorf("create backup dir: %w", err)
 	}
+
+	if err := e.acquireLock(); err != nil {
+		return nil, err
+	}
+	defer e.releaseLock()
 
 	result := &Result{}
 
