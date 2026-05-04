@@ -1,0 +1,18 @@
+# Binary
+claudectl
+claude-sessions
+
+# Goreleaser
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Superpowers brainstorm artifacts
+.superpowers/
+.claude/
