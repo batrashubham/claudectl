@@ -17,15 +17,6 @@ archives:
   - format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
-brews:
-  - repository:
-      owner: batrashubham
-      name: homebrew-tap
-    homepage: "https://github.com/batrashubham/claudectl"
-    description: "Manage, backup, and resume Claude Code sessions"
-    install: |
-      bin.install "claudectl"
-
 changelog:
   sort: asc
   filters:
