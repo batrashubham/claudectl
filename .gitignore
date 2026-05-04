@@ -12,3 +12,4 @@ claude-sessions
 
 # Superpowers brainstorm artifacts
 .superpowers/
+.claude/
