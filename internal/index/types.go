@@ -38,6 +38,7 @@ type SessionMeta struct {
 	PromptCount int
 	Status      SessionStatus
 	FileSize    int64
+	SearchText  string // All prompts concatenated (lowercase) for full-text search
 
 	// Used during index building
 	activeExists    bool

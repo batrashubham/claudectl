@@ -111,6 +111,7 @@ func (b *Builder) parseHistoryFile(path string, sessions map[string]*SessionMeta
 				s.LastPrompt = prompt
 				s.lastPromptTime = ts
 			}
+			s.SearchText += strings.ToLower(entry.Display) + " "
 		}
 		s.PromptCount++
 	}

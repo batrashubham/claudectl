@@ -271,8 +271,8 @@ func (m *Model) applyFilter() {
 		}
 
 		if query != "" {
-			lower := strings.ToLower(s.FirstPrompt + " " + s.LastPrompt + " " + s.Project + " " + s.ID)
-			if !strings.Contains(lower, query) {
+			searchable := s.SearchText + strings.ToLower(s.Project) + " " + s.ID
+			if !strings.Contains(searchable, query) {
 				continue
 			}
 		}
