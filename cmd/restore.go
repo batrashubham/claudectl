@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pullCmd = &cobra.Command{
-	Use:   "pull",
-	Short: "Pull latest backup from git remote (for multi-machine sync)",
+var restoreCmd = &cobra.Command{
+	Use:   "restore",
+	Short: "Restore sessions from git remote (for multi-machine sync)",
 	Long: `Fetch the latest session backups from the configured git remote.
 
 Use this on a new machine to get all sessions backed up from another computer,
@@ -46,5 +46,5 @@ this will clone the repo. Otherwise it pulls the latest changes.`,
 }
 
 func init() {
-	rootCmd.AddCommand(pullCmd)
+	rootCmd.AddCommand(restoreCmd)
 }
