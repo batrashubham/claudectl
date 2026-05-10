@@ -2,6 +2,9 @@
 claudectl
 claude-sessions
 
+# Goreleaser
+dist/
+
 # IDE
 .idea/
 .vscode/
