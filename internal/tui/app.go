@@ -696,6 +696,9 @@ func (m Model) doSync() tea.Cmd {
 
 		if m.config.GitRemote != "" {
 			engine.GitSetupRemote(m.config.GitRemote)
+			if m.config.GitPush {
+				engine.GitPull()
+			}
 		}
 
 		result, err := engine.Sync()
@@ -706,7 +709,7 @@ func (m Model) doSync() tea.Cmd {
 			engine.GitCommit(result)
 		}
 		if m.config.GitPush {
-			engine.GitPush() // fail gracefully in TUI
+			engine.GitPush()
 		}
 		return syncDoneMsg{result: result}
 	}

@@ -45,6 +45,12 @@ func runSyncOnce() error {
 		if err := engine.GitSetupRemote(cfg.GitRemote); err != nil {
 			fmt.Printf("Warning: could not setup git remote: %v\n", err)
 		}
+		// Pull from remote first to get sessions from other machines
+		if cfg.GitPush {
+			if err := engine.GitPull(); err != nil {
+				fmt.Printf("Warning: pull failed: %v\n", err)
+			}
+		}
 	}
 
 	result, err := engine.Sync()
@@ -83,6 +89,9 @@ func runSyncWatch() error {
 
 		if cfg.GitRemote != "" {
 			engine.GitSetupRemote(cfg.GitRemote)
+			if cfg.GitPush {
+				engine.GitPull()
+			}
 		}
 
 		result, err := engine.Sync()

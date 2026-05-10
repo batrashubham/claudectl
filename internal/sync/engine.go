@@ -230,6 +230,41 @@ func (e *Engine) GitPush() error {
 	return nil
 }
 
+func (e *Engine) GitPull() error {
+	gitDir := e.backupDir
+
+	// Must have a git repo
+	if _, err := os.Stat(filepath.Join(gitDir, ".git")); os.IsNotExist(err) {
+		return fmt.Errorf("backup dir is not a git repo")
+	}
+
+	// Check remote exists
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = gitDir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("no git remote configured — run 'claudectl setup' or set git_remote in config")
+	}
+
+	if err := runGit(gitDir, "pull", "--rebase", "origin", "main"); err != nil {
+		return fmt.Errorf("git pull failed: %w", err)
+	}
+
+	return nil
+}
+
+func (e *Engine) GitClone(remote string) error {
+	if err := os.MkdirAll(filepath.Dir(e.backupDir), 0755); err != nil {
+		return err
+	}
+
+	cmd := exec.Command("git", "clone", remote, e.backupDir)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone failed: %w", err)
+	}
+
+	return nil
+}
+
 func runGit(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
