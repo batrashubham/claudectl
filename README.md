@@ -11,6 +11,8 @@ Claude Code deletes session transcripts after 30 days. If you want to revisit an
 - **Git-versioning** every sync so you have full history
 - **Indexing** sessions with metadata from `history.jsonl` (prompts, timestamps, projects)
 - **Resuming** archived sessions by restoring them back to Claude's projects directory
+- **Starter sessions** — save warm sessions as templates, spawn new ones pre-loaded with context
+- **Multi-machine** — push to a git remote, restore on any machine
 
 ## Install
 
@@ -76,6 +78,10 @@ claudectl sync --watch   # Continuous sync (every 5m, configurable)
 claudectl list           # Plain text session list
 claudectl list --json    # JSON output for scripting
 claudectl resume <id>    # Resume a session directly by ID
+claudectl restore        # Pull latest backup from git remote
+claudectl template save <id> --name <name>   # Save session as template
+claudectl template spawn <name> --resume     # Start new session from template
+claudectl template list                      # List available templates
 claudectl cron install   # Add to crontab (default: every 5 min)
 claudectl cron status    # Check if cron is active
 claudectl cron remove    # Remove from crontab
@@ -129,6 +135,35 @@ The TUI shows all your sessions — active, archived, and ghost (history-only):
 | `g/G` | Jump to top/bottom |
 | `q` | Quit |
 
+## Starter Sessions (Templates)
+
+Save a warm session (where Claude already knows your project) as a template. Spawn new sessions from it to skip the warm-up phase.
+
+```bash
+# Save current session as a template
+claudectl template save d98e8856-... --name warm-context --trim
+
+# Later, start a fresh session with full project context
+claudectl template spawn warm-context --resume
+```
+
+Templates are project-scoped and backed up with sync. Use `--trim` to strip non-essential entries (titles, queue ops) and keep the template lean.
+
+## Multi-Machine Sync
+
+Back up sessions to a git remote and restore on any machine:
+
+```bash
+# Machine A: sync and push
+claudectl sync
+
+# Machine B: restore from remote
+claudectl restore
+
+# Machine B: browse and resume any session
+claudectl
+```
+
 ## Configuration
 
 Config lives at `~/.claudectl/config.toml`:
@@ -136,6 +171,7 @@ Config lives at `~/.claudectl/config.toml`:
 ```toml
 backup_dir = "~/.claudectl/backup"
 claude_dir = "~/.claude"
+templates_dir = "~/.claudectl/templates"
 sync_on_start = true
 git_auto_commit = true
 git_remote = "git@github.com:you/claude-backup.git"
@@ -146,6 +182,7 @@ git_push = true
 |-------|---------|-------------|
 | `backup_dir` | `~/.claudectl/backup` | Where to store the backup (git repo) |
 | `claude_dir` | `~/.claude` | Claude Code's config directory |
+| `templates_dir` | `~/.claudectl/templates` | Where to store session templates |
 | `sync_on_start` | `true` | Auto-sync when TUI launches |
 | `git_auto_commit` | `true` | Commit after each sync |
 | `git_remote` | `""` | Git remote URL for pushing backups |
@@ -182,8 +219,15 @@ When you resume an archived session:
 ```
 ~/.claudectl/
 ├── config.toml
-└── backup/               # git repo
+├── templates/                # session templates (project-scoped)
+│   └── -Users-you-code-project-a/
+│       └── warm-context/
+│           ├── meta.json
+│           ├── session.jsonl
+│           └── subagents/
+└── backup/                   # git repo (synced + pushed)
     ├── history.jsonl
+    ├── templates/            # templates backed up here too
     └── projects/
         ├── -Users-you-code-project-a/
         │   ├── abc123.jsonl
