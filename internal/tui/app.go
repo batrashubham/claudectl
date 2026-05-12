@@ -693,6 +693,7 @@ func (m Model) projectCount() int {
 func (m Model) doSync() tea.Cmd {
 	return func() tea.Msg {
 		engine := sync.NewEngine(m.config.ClaudeDir, m.config.BackupDir)
+		engine.SetTemplatesDir(m.config.TemplatesDir)
 
 		if m.config.GitRemote != "" {
 			engine.GitSetupRemote(m.config.GitRemote)
