@@ -14,6 +14,7 @@ type Config struct {
 	GitAutoCommit bool   `toml:"git_auto_commit"`
 	GitRemote     string `toml:"git_remote"`
 	GitPush       bool   `toml:"git_push"`
+	TemplatesDir  string `toml:"templates_dir"`
 }
 
 func DefaultConfig() *Config {
@@ -25,6 +26,7 @@ func DefaultConfig() *Config {
 		GitAutoCommit: true,
 		GitRemote:     "",
 		GitPush:       false,
+		TemplatesDir:  filepath.Join(home, ".claudectl", "templates"),
 	}
 }
 
