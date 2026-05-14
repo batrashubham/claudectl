@@ -333,13 +333,16 @@ func (m *Model) ensureVisible() {
 }
 
 func (m Model) listHeight() int {
-	available := m.height - 6
+	available := m.height - 8
 	if m.state == searchView {
+		available -= 3
+	}
+	if m.grouped {
 		available -= 2
 	}
 	rows := available / 3
-	if rows < 3 {
-		rows = 3
+	if rows < 2 {
+		rows = 2
 	}
 	return rows
 }
