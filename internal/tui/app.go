@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ const (
 	filterAll filterMode = iota
 	filterActive
 	filterArchived
+	filterGhost
 )
 
 func (f filterMode) label() string {
@@ -37,6 +39,8 @@ func (f filterMode) label() string {
 		return "Active"
 	case filterArchived:
 		return "Archive"
+	case filterGhost:
+		return "Ghost"
 	default:
 		return "All"
 	}
@@ -55,13 +59,27 @@ func (f filterMode) count(sessions []index.SessionMeta) int {
 	case filterArchived:
 		c := 0
 		for _, s := range sessions {
-			if s.Status == index.StatusArchived {
+			if s.Status == index.StatusArchived && s.FileSize > 0 {
+				c++
+			}
+		}
+		return c
+	case filterGhost:
+		c := 0
+		for _, s := range sessions {
+			if s.FileSize == 0 {
 				c++
 			}
 		}
 		return c
 	default:
-		return len(sessions)
+		c := 0
+		for _, s := range sessions {
+			if s.FileSize > 0 {
+				c++
+			}
+		}
+		return c
 	}
 }
 
@@ -78,6 +96,7 @@ type Model struct {
 	offset     int
 	search     textinput.Model
 	filter     filterMode
+	grouped    bool
 	width      int
 	height     int
 	config     *config.Config
@@ -201,7 +220,12 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.doSync()
 		}
 	case msg.String() == "f", msg.String() == "tab":
-		m.filter = (m.filter + 1) % 3
+		m.filter = (m.filter + 1) % 4
+		m.applyFilter()
+		m.cursor = 0
+		m.offset = 0
+	case msg.String() == "p":
+		m.grouped = !m.grouped
 		m.applyFilter()
 		m.cursor = 0
 		m.offset = 0
@@ -260,12 +284,20 @@ func (m *Model) applyFilter() {
 
 	for _, s := range m.sessions {
 		switch m.filter {
+		case filterAll:
+			if s.FileSize == 0 {
+				continue
+			}
 		case filterActive:
 			if s.Status != index.StatusActive {
 				continue
 			}
 		case filterArchived:
-			if s.Status != index.StatusArchived {
+			if s.Status != index.StatusArchived || s.FileSize == 0 {
+				continue
+			}
+		case filterGhost:
+			if s.FileSize > 0 {
 				continue
 			}
 		}
@@ -278,6 +310,15 @@ func (m *Model) applyFilter() {
 		}
 
 		m.filtered = append(m.filtered, s)
+	}
+
+	if m.grouped {
+		sort.SliceStable(m.filtered, func(i, j int) bool {
+			if m.filtered[i].Project != m.filtered[j].Project {
+				return m.filtered[i].Project < m.filtered[j].Project
+			}
+			return m.filtered[i].LastSeen.After(m.filtered[j].LastSeen)
+		})
 	}
 }
 
@@ -360,8 +401,24 @@ func (m Model) viewList() string {
 
 	// ═══ SESSION LIST ═══
 	visibleRows := m.listHeight()
+	lastProject := ""
 	for i := m.offset; i < len(m.filtered) && i < m.offset+visibleRows; i++ {
 		s := m.filtered[i]
+
+		// Project divider when grouped
+		if m.grouped {
+			project := filepath.Base(s.Project)
+			if project == "" || project == "." {
+				project = s.ProjectDir
+			}
+			if project != lastProject {
+				divLabel := lipgloss.NewStyle().Foreground(purple3).Bold(true).Render(project)
+				divLine := lipgloss.NewStyle().Foreground(purple5).Render(strings.Repeat("─", max(0, w-lipgloss.Width(project)-6)))
+				b.WriteString("  " + divLabel + " " + divLine + "\n")
+				lastProject = project
+			}
+		}
+
 		b.WriteString(m.renderSessionRow(s, i == m.cursor, w))
 	}
 
@@ -386,7 +443,7 @@ func (m Model) viewList() string {
 }
 
 func (m Model) renderFilters() string {
-	filters := []filterMode{filterAll, filterActive, filterArchived}
+	filters := []filterMode{filterAll, filterActive, filterArchived, filterGhost}
 	var parts []string
 
 	for _, f := range filters {
@@ -532,6 +589,7 @@ func (m Model) renderHelp() string {
 		{"/", "search"},
 		{"s", "sync"},
 		{"f", "filter"},
+		{"p", "group"},
 		{"q", "quit"},
 	}
 
