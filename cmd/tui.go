@@ -3,10 +3,14 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/session"
+	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/batrashubham/claudectl/internal/tui"
 )
 
@@ -25,8 +29,9 @@ func runTUI() error {
 		return err
 	}
 
-	// Check if user wants to resume a session
+	// Check post-TUI actions
 	if m, ok := finalModel.(tui.Model); ok {
+		// Resume a session
 		if resumeID := m.ResumeID(); resumeID != "" {
 			var target *index.SessionMeta
 			for i := range sessions {
@@ -47,6 +52,32 @@ func runTUI() error {
 				os.Exit(1)
 			}
 			return locator.Resume(target.ID, target.ProjectDir, target.Project)
+		}
+
+		// Spawn from template
+		if tmplName := m.SpawnTemplate(); tmplName != "" {
+			cwd, _ := os.Getwd()
+			projectDir := strings.ReplaceAll(cwd, "/", "-")
+
+			store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+			result, err := store.Spawn(projectDir, tmplName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "spawn failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Printf("Spawned session %s from template '%s'\n", result.SessionID[:12], tmplName)
+			claudeBin, err := exec.LookPath("claude")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "claude not found in PATH\n")
+				os.Exit(1)
+			}
+			if result.Project != "" {
+				if _, err := os.Stat(result.Project); err == nil {
+					os.Chdir(result.Project)
+				}
+			}
+			return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID}, os.Environ())
 		}
 	}
 

@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/sync"
+	"github.com/batrashubham/claudectl/internal/template"
 )
 
 type viewState int
@@ -90,13 +90,20 @@ type syncDoneMsg struct {
 
 type Model struct {
 	state      viewState
+	focus      paneFocus
 	sessions   []index.SessionMeta
 	filtered   []index.SessionMeta
+	templates  []template.Meta
 	cursor     int
 	offset     int
 	search     textinput.Model
 	filter     filterMode
-	grouped    bool
+
+	// Sidebar
+	sidebarItems  []sidebarItem
+	sidebarCursor int
+	sidebarOffset int
+
 	width      int
 	height     int
 	config     *config.Config
@@ -105,6 +112,7 @@ type Model struct {
 	syncResult string
 	err        error
 	resumeID   string
+	spawnTmpl  string
 }
 
 func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
@@ -115,13 +123,27 @@ func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
 	ti.TextStyle = lipgloss.NewStyle().Foreground(text)
 	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(dimGray)
 
-	return Model{
-		state:    listView,
-		sessions: sessions,
-		filtered: sessions,
-		search:   ti,
-		config:   cfg,
+	// Load templates
+	store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+	templates, _ := store.ListAll()
+
+	sidebarItems := buildSidebarItems(sessions, templates)
+
+	m := Model{
+		state:        listView,
+		focus:        focusList,
+		sessions:     sessions,
+		templates:    templates,
+		search:       ti,
+		config:       cfg,
+		sidebarItems: sidebarItems,
 	}
+	m.applyFilter()
+	return m
+}
+
+func (m Model) SpawnTemplate() string {
+	return m.spawnTmpl
 }
 
 func (m Model) Init() tea.Cmd {
@@ -177,30 +199,65 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.String() == "q" || msg.String() == "ctrl+c":
 		return m, tea.Quit
+	case msg.String() == "tab":
+		if m.focus == focusSidebar {
+			m.focus = focusList
+		} else {
+			m.focus = focusSidebar
+		}
+		return m, nil
 	case msg.String() == "j" || msg.String() == "down":
-		if m.cursor < len(m.filtered)-1 {
-			m.cursor++
-			m.ensureVisible()
+		if m.focus == focusSidebar {
+			if m.sidebarCursor < len(m.sidebarItems)-1 {
+				m.sidebarCursor++
+				m.applyFilter()
+				m.cursor = 0
+				m.offset = 0
+			}
+		} else {
+			if m.cursor < len(m.filtered)-1 {
+				m.cursor++
+				m.ensureVisible()
+			}
 		}
 	case msg.String() == "k" || msg.String() == "up":
-		if m.cursor > 0 {
-			m.cursor--
-			m.ensureVisible()
+		if m.focus == focusSidebar {
+			if m.sidebarCursor > 0 {
+				m.sidebarCursor--
+				m.applyFilter()
+				m.cursor = 0
+				m.offset = 0
+			}
+		} else {
+			if m.cursor > 0 {
+				m.cursor--
+				m.ensureVisible()
+			}
 		}
 	case msg.String() == "G":
-		if len(m.filtered) > 0 {
+		if m.focus == focusList && len(m.filtered) > 0 {
 			m.cursor = len(m.filtered) - 1
 			m.ensureVisible()
 		}
 	case msg.String() == "g":
-		m.cursor = 0
-		m.ensureVisible()
+		if m.focus == focusList {
+			m.cursor = 0
+			m.ensureVisible()
+		}
 	case msg.String() == "enter":
-		if len(m.filtered) > 0 {
+		if m.focus == focusSidebar {
+			// If template selected, spawn it
+			if tmpl := m.selectedTemplate(); tmpl != "" {
+				m.spawnTmpl = tmpl
+				return m, tea.Quit
+			}
+			// Otherwise switch focus to list
+			m.focus = focusList
+		} else if len(m.filtered) > 0 {
 			m.state = detailView
 		}
 	case msg.String() == "r":
-		if len(m.filtered) > 0 {
+		if m.focus == focusList && len(m.filtered) > 0 {
 			s := m.filtered[m.cursor]
 			if s.FileSize == 0 {
 				m.syncResult = "cannot resume: session file no longer exists"
@@ -219,13 +276,8 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncResult = ""
 			return m, m.doSync()
 		}
-	case msg.String() == "f", msg.String() == "tab":
+	case msg.String() == "f":
 		m.filter = (m.filter + 1) % 4
-		m.applyFilter()
-		m.cursor = 0
-		m.offset = 0
-	case msg.String() == "p":
-		m.grouped = !m.grouped
 		m.applyFilter()
 		m.cursor = 0
 		m.offset = 0
@@ -280,9 +332,22 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) applyFilter() {
 	query := strings.ToLower(m.search.Value())
+	projectFilter := m.sidebarProjectFilter()
 	m.filtered = nil
 
 	for _, s := range m.sessions {
+		// Sidebar project filter
+		if projectFilter != "" {
+			project := filepath.Base(s.Project)
+			if project == "" || project == "." {
+				project = s.ProjectDir
+			}
+			if project != projectFilter {
+				continue
+			}
+		}
+
+		// Status filter
 		switch m.filter {
 		case filterAll:
 			if s.FileSize == 0 {
@@ -302,6 +367,7 @@ func (m *Model) applyFilter() {
 			}
 		}
 
+		// Search
 		if query != "" {
 			searchable := s.SearchText + strings.ToLower(s.Project) + " " + s.ID
 			if !strings.Contains(searchable, query) {
@@ -310,15 +376,6 @@ func (m *Model) applyFilter() {
 		}
 
 		m.filtered = append(m.filtered, s)
-	}
-
-	if m.grouped {
-		sort.SliceStable(m.filtered, func(i, j int) bool {
-			if m.filtered[i].Project != m.filtered[j].Project {
-				return m.filtered[i].Project < m.filtered[j].Project
-			}
-			return m.filtered[i].LastSeen.After(m.filtered[j].LastSeen)
-		})
 	}
 }
 
@@ -333,12 +390,9 @@ func (m *Model) ensureVisible() {
 }
 
 func (m Model) listHeight() int {
-	available := m.height - 8
+	available := m.height - 7
 	if m.state == searchView {
 		available -= 3
-	}
-	if m.grouped {
-		available -= 2
 	}
 	rows := available / 3
 	if rows < 2 {
@@ -364,85 +418,167 @@ func (m Model) viewList() string {
 	w := m.width
 	var b strings.Builder
 
-	// ═══ HEADER LINE ═══
+	// ═══ HEADER ═══
 	title := lipgloss.NewStyle().Bold(true).Foreground(purple1).Render(" ⚡ CLAUDECTL")
 	stats := lipgloss.NewStyle().Foreground(midGray).Render(
 		fmt.Sprintf("  %d sessions  ·  %d projects", len(m.sessions), m.projectCount()))
-
 	syncBadge := ""
 	if m.syncing {
 		syncBadge = lipgloss.NewStyle().Foreground(purple2).Render("  ◈ syncing...")
 	} else if !m.lastSync.IsZero() {
 		syncBadge = lipgloss.NewStyle().Foreground(green).Render("  ✓ synced " + humanize.Time(m.lastSync))
 	}
-
-	headerLeft := title + stats + syncBadge
-	b.WriteString(headerLeft + "\n\n")
-
-	// ═══ FILTER BAR ═══
-	filterLine := m.renderFilters()
-	b.WriteString(filterLine + "\n")
+	b.WriteString(title + stats + syncBadge + "\n")
 
 	// ═══ SEPARATOR ═══
 	sep := lipgloss.NewStyle().Foreground(purple5).Render(strings.Repeat("━", w))
 	b.WriteString(sep + "\n")
 
-	// ═══ SEARCH (if active) ═══
+	// ═══ TWO-PANE LAYOUT ═══
+	sidebarWidth := 24
+	listWidth := w - sidebarWidth - 3 // 3 for separator column
+
+	// Build sidebar content
+	sidebarContent := m.renderSidebar(sidebarWidth, m.height-5)
+
+	// Build list content
+	listContent := m.renderListPane(listWidth)
+
+	// Join horizontally
+	sidebarBlock := lipgloss.NewStyle().Width(sidebarWidth).Render(sidebarContent)
+	sepCol := m.renderVerticalSep(m.height - 5)
+	listBlock := lipgloss.NewStyle().Width(listWidth).Render(listContent)
+
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, sidebarBlock, sepCol, listBlock))
+	b.WriteString("\n")
+
+	// ═══ FOOTER ═══
+	b.WriteString(sep + "\n")
+	if m.syncResult != "" {
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(midGray).Render("sync: "+m.syncResult) + "\n")
+	}
+	b.WriteString("  " + m.renderHelp())
+
+	return b.String()
+}
+
+func (m Model) renderSidebar(w, h int) string {
+	var b strings.Builder
+
+	// Title
+	sidebarTitle := "PROJECTS"
+	if m.focus == focusSidebar {
+		sidebarTitle = lipgloss.NewStyle().Bold(true).Foreground(purple2).Render(sidebarTitle)
+	} else {
+		sidebarTitle = lipgloss.NewStyle().Foreground(dimGray).Render(sidebarTitle)
+	}
+	b.WriteString(" " + sidebarTitle + "\n\n")
+
+	lines := 2
+	templatesStarted := false
+
+	for i, item := range m.sidebarItems {
+		if lines >= h-1 {
+			break
+		}
+
+		// Templates section header
+		if item.isTmpl && !templatesStarted {
+			templatesStarted = true
+			b.WriteString("\n")
+			tmplHeader := lipgloss.NewStyle().Foreground(dimGray).Render(" TEMPLATES")
+			if m.focus == focusSidebar {
+				tmplHeader = lipgloss.NewStyle().Foreground(purple2).Render(" TEMPLATES")
+			}
+			b.WriteString(tmplHeader + "\n")
+			lines += 2
+		}
+
+		selected := (i == m.sidebarCursor) && m.focus == focusSidebar
+		label := item.label
+		if len(label) > w-6 {
+			label = label[:w-6]
+		}
+
+		var line string
+		if selected {
+			cursor := lipgloss.NewStyle().Foreground(cyan).Bold(true).Render("▸")
+			name := lipgloss.NewStyle().Foreground(white).Bold(true).Render(label)
+			if item.isTmpl {
+				line = " " + cursor + " " + lipgloss.NewStyle().Foreground(purple1).Render("◆") + " " + name
+			} else {
+				countStr := lipgloss.NewStyle().Foreground(cyan).Render(fmt.Sprintf(" %d", item.count))
+				line = " " + cursor + " " + name + countStr
+			}
+		} else {
+			if item.isTmpl {
+				name := lipgloss.NewStyle().Foreground(midGray).Render(label)
+				line = "   " + lipgloss.NewStyle().Foreground(purple4).Render("◆") + " " + name
+			} else if item.isAll {
+				name := lipgloss.NewStyle().Foreground(ltGray).Render(label)
+				countStr := lipgloss.NewStyle().Foreground(dimGray).Render(fmt.Sprintf(" %d", item.count))
+				line = "   " + name + countStr
+			} else {
+				name := lipgloss.NewStyle().Foreground(ltGray).Render(label)
+				countStr := lipgloss.NewStyle().Foreground(dimGray).Render(fmt.Sprintf(" %d", item.count))
+				line = "   " + name + countStr
+			}
+		}
+
+		b.WriteString(line + "\n")
+		lines++
+	}
+
+	return b.String()
+}
+
+func (m Model) renderListPane(w int) string {
+	var b strings.Builder
+
+	// Filter bar
+	b.WriteString(m.renderFilters() + "\n")
+
+	// Search (if active)
 	if m.state == searchView {
 		searchInput := lipgloss.NewStyle().Foreground(text).Render(m.search.View())
-		searchContent := lipgloss.NewStyle().
-			Foreground(purple2).Bold(true).Render("/") + " " + searchInput
+		searchContent := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("/") + " " + searchInput
 		searchBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(purple3).
-			Width(w - 8).
+			Width(w - 4).
 			PaddingLeft(1).
-			MarginLeft(2).
 			Render(searchContent)
 		b.WriteString(searchBox + "\n")
 	}
 
-	// ═══ SESSION LIST ═══
+	// Sessions
 	visibleRows := m.listHeight()
-	lastProject := ""
 	for i := m.offset; i < len(m.filtered) && i < m.offset+visibleRows; i++ {
 		s := m.filtered[i]
-
-		// Project divider when grouped
-		if m.grouped {
-			project := filepath.Base(s.Project)
-			if project == "" || project == "." {
-				project = s.ProjectDir
-			}
-			if project != lastProject {
-				divLabel := lipgloss.NewStyle().Foreground(purple3).Bold(true).Render(project)
-				divLine := lipgloss.NewStyle().Foreground(purple5).Render(strings.Repeat("─", max(0, w-lipgloss.Width(project)-6)))
-				b.WriteString("  " + divLabel + " " + divLine + "\n")
-				lastProject = project
-			}
-		}
-
-		b.WriteString(m.renderSessionRow(s, i == m.cursor, w))
+		isSelected := (i == m.cursor) && m.focus == focusList
+		b.WriteString(m.renderSessionRow(s, isSelected, w))
 	}
 
-	// Pad remaining space
+	// Pad
 	rendered := min(len(m.filtered)-m.offset, visibleRows)
 	for i := rendered; i < visibleRows; i++ {
 		b.WriteString("\n\n\n")
 	}
 
-	// ═══ FOOTER ═══
-	b.WriteString(sep + "\n")
-
-	// Status line (only if there's something to show)
-	if m.syncResult != "" {
-		b.WriteString("  " + lipgloss.NewStyle().Foreground(midGray).Render("sync: "+m.syncResult) + "\n")
+	if len(m.filtered) == 0 {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(dimGray).Render("  No sessions") + "\n")
 	}
 
-	// Help line
-	b.WriteString("  " + m.renderHelp())
-
 	return b.String()
+}
+
+func (m Model) renderVerticalSep(h int) string {
+	var lines []string
+	sepChar := lipgloss.NewStyle().Foreground(purple5).Render("│")
+	for i := 0; i < h; i++ {
+		lines = append(lines, " "+sepChar+" ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderFilters() string {
@@ -587,12 +723,12 @@ func (m Model) renderHelp() string {
 	}
 	bindings := []binding{
 		{"↑↓", "navigate"},
-		{"⏎", "detail"},
+		{"tab", "switch pane"},
+		{"⏎", "detail/spawn"},
 		{"r", "resume"},
 		{"/", "search"},
 		{"s", "sync"},
 		{"f", "filter"},
-		{"p", "group"},
 		{"q", "quit"},
 	}
 
