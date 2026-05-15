@@ -282,6 +282,35 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.applyFilter()
 		m.cursor = 0
 		m.offset = 0
+	case msg.String() == "t":
+		// Save current session as template
+		if m.focus == focusList && len(m.filtered) > 0 {
+			s := m.filtered[m.cursor]
+			if s.FileSize == 0 {
+				m.syncResult = "cannot save ghost session as template"
+			} else {
+				project := filepath.Base(s.Project)
+				name := strings.ToLower(strings.ReplaceAll(project, " ", "-"))
+				name = name + "-warm"
+				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
+				err := store.Save(template.SaveOptions{
+					SessionID:  s.ID,
+					ProjectDir: s.ProjectDir,
+					Project:    s.Project,
+					Name:       name,
+					Description: fmt.Sprintf("Warm context from %s", project),
+					Trim:       true,
+					Force:      true,
+				})
+				if err != nil {
+					m.syncResult = fmt.Sprintf("save failed: %v", err)
+				} else {
+					m.syncResult = fmt.Sprintf("template '%s' saved", name)
+					m.templates, _ = store.ListAll()
+					m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+				}
+			}
+		}
 	case msg.String() == "d":
 		// Delete template when focused on one in sidebar
 		if m.focus == focusSidebar {
@@ -794,9 +823,10 @@ func (m Model) renderHelp() string {
 	}
 	bindings := []binding{
 		{"↑↓", "navigate"},
-		{"tab", "switch pane"},
+		{"tab", "pane"},
 		{"⏎", "detail/spawn"},
 		{"r", "resume"},
+		{"t", "save template"},
 		{"/", "search"},
 		{"s", "sync"},
 		{"f", "filter"},
