@@ -84,6 +84,43 @@ func (f filterMode) count(sessions []index.SessionMeta) int {
 	}
 }
 
+func (f filterMode) countFiltered(sessions []index.SessionMeta, projectFilter string) int {
+	c := 0
+	for _, s := range sessions {
+		// Apply project filter
+		if projectFilter != "" {
+			project := filepath.Base(s.Project)
+			if project == "" || project == "." {
+				project = s.ProjectDir
+			}
+			if project != projectFilter {
+				continue
+			}
+		}
+		// Apply status filter
+		switch f {
+		case filterActive:
+			if s.Status != index.StatusActive {
+				continue
+			}
+		case filterArchived:
+			if s.Status != index.StatusArchived || s.FileSize == 0 {
+				continue
+			}
+		case filterGhost:
+			if s.FileSize > 0 {
+				continue
+			}
+		default:
+			if s.FileSize == 0 {
+				continue
+			}
+		}
+		c++
+	}
+	return c
+}
+
 type syncDoneMsg struct {
 	result *sync.Result
 	err    error
@@ -611,14 +648,14 @@ func (m Model) renderListPane(w int) string {
 		b.WriteString(m.renderSessionRow(s, isSelected, w))
 	}
 
-	// Pad
+	// Pad remaining space (always fill to fixed height)
 	rendered := min(len(m.filtered)-m.offset, visibleRows)
+	if len(m.filtered) == 0 {
+		b.WriteString("\n" + lipgloss.NewStyle().Foreground(dimGray).Render("  No sessions") + "\n\n")
+		rendered = 1
+	}
 	for i := rendered; i < visibleRows; i++ {
 		b.WriteString("\n\n\n")
-	}
-
-	if len(m.filtered) == 0 {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(dimGray).Render("  No sessions") + "\n")
 	}
 
 	return b.String()
@@ -686,7 +723,7 @@ func (m Model) renderFilters() string {
 	var parts []string
 
 	for _, f := range filters {
-		count := f.count(m.sessions)
+		count := f.countFiltered(m.sessions, m.sidebarProjectFilter())
 		label := fmt.Sprintf(" %s %d ", f.label(), count)
 		if f == m.filter {
 			parts = append(parts, lipgloss.NewStyle().
