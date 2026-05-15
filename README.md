@@ -91,27 +91,25 @@ claudectl setup          # Re-run onboarding wizard
 
 ## TUI
 
-The TUI shows all your sessions — active, archived, and ghost (history-only):
+Two-pane layout with a project sidebar and session list:
 
 ```
-⚡ CLAUDECTL  12 sessions  ·  4 projects  ✓ synced now
-
- All 12   Active 8   Archive 4
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-▸ ● my-webapp                                            6m
-     add dark mode support to the settings page
-     ⊡ 15 prompts  ◈ 2.1 MB
-  ● api-service                                          3h
-     implement rate limiting on the /users endpoint...
-     ⊡ 21 prompts  ◈ 3.1 MB
-  ○ infra-migration                                      3w
-     help me migrate from EC2 to ECS Fargate...
-     ⊡ 40 prompts  ◈ 3.2 MB
-  △ old-prototype                                       2mo
-     scaffold the initial project structure...
-     ⊡ 4 prompts
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-↑↓ navigate   ⏎ detail   r resume   / search   s sync   f filter   q quit
+⚡ CLAUDECTL  25 sessions  ·  8 projects  ✓ synced now
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PROJECTS             │  All 8   Active 6   Archive 2
+                     │
+▸ All 25             │  ▸ ● api-service                          3h
+  my-webapp 3        │       implement rate limiting on the...
+  api-service 8      │       ⊡ 21 prompts  ◈ 3.1 MB
+  infra 4            │    ● api-service                          1d
+  cli-tools 5        │       fix the 409 retry logic...
+                     │       ⊡ 6 prompts  ◈ 183 kB
+TEMPLATES            │    ○ api-service                          3w
+  ◆ warm-context     │       add circuit breaker pattern...
+  ◆ api-deep-dive    │       ⊡ 15 prompts  ◈ 2.1 MB
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+↑↓ navigate  tab pane  ⏎ detail/spawn  r resume  t save template
+/ search  s sync  f filter  q quit
 ```
 
 ### Session indicators
@@ -120,20 +118,31 @@ The TUI shows all your sessions — active, archived, and ghost (history-only):
 |------|---------|
 | `●` | Active — exists in `~/.claude/projects/` |
 | `○` | Archived — only in backup (resumable) |
-| `△` | Ghost — only in history, file was deleted before backup (not resumable) |
+| `△` | Ghost — only in history, not resumable (hidden by default) |
 
 ### Key bindings
 
 | Key | Action |
 |-----|--------|
-| `j/k` or `↑/↓` | Navigate |
-| `Enter` | Detail view (split panel: metadata + conversation) |
+| `j/k` or `↑/↓` | Navigate (in active pane) |
+| `Tab` | Switch focus between sidebar and session list |
+| `Enter` | Detail view (sessions) / Spawn (templates) |
 | `r` | Resume session (restores from backup if needed) |
-| `/` | Search by project name or prompt text |
-| `f` or `Tab` | Cycle filter: All → Active → Archive |
+| `t` | Save current session as a template |
+| `d` | Delete template (when focused in sidebar) |
+| `/` | Full-text search across all prompts |
+| `f` | Cycle filter: All → Active → Archive → Ghost |
 | `s` | Sync now |
 | `g/G` | Jump to top/bottom |
 | `q` | Quit |
+
+### Sidebar
+
+The left sidebar shows:
+- **Projects** with session counts — select to filter the session list
+- **Templates** — select to view details, Enter to spawn, `d` to delete
+
+Filter counts update based on the selected project.
 
 ## Starter Sessions (Templates)
 
