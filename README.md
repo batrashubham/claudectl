@@ -146,7 +146,29 @@ Filter counts update based on the selected project.
 
 ## Starter Sessions (Templates)
 
-Save a warm session (where Claude already knows your project) as a template. Spawn new sessions from it to skip the warm-up phase.
+### Why templates when you have CLAUDE.md?
+
+`CLAUDE.md` tells Claude *what to do* — conventions, patterns, rules. But it doesn't give Claude *understanding*. Every new session still spends time:
+
+- Reading through your codebase structure
+- Exploring key files and understanding relationships
+- Building a mental model of your architecture
+- Discovering patterns that aren't documented
+
+A **starter template** captures a session where Claude has already done all of this. It's the difference between giving someone a map (CLAUDE.md) vs. giving them a map AND having already walked the terrain with them (template).
+
+| | CLAUDE.md | Template |
+|---|---|---|
+| What it provides | Instructions & rules | Deep project understanding |
+| Context on startup | ~1-2k tokens | Full conversation (thousands of tokens) |
+| Knows file structure | Only if documented | Yes, from exploration |
+| Knows code patterns | Only if documented | Yes, from reading actual code |
+| Knows gotchas/edge cases | Only if documented | Yes, from prior discovery |
+| Startup time | Seconds (but then explores) | Instant (already explored) |
+
+**Best practice**: Use both. CLAUDE.md for rules that should always apply. Templates for warm context that skips the exploration phase.
+
+### Usage
 
 ```bash
 # Save current session as a template
@@ -154,6 +176,8 @@ claudectl template save d98e8856-... --name warm-context --trim
 
 # Later, start a fresh session with full project context
 claudectl template spawn warm-context --resume
+
+# Or from TUI: press 't' on a session to save, Enter on template to spawn
 ```
 
 Templates are project-scoped and backed up with sync. Use `--trim` to strip non-essential entries (titles, queue ops) and keep the template lean.
