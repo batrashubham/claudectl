@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -281,6 +282,23 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.applyFilter()
 		m.cursor = 0
 		m.offset = 0
+	case msg.String() == "d":
+		// Delete template when focused on one in sidebar
+		if m.focus == focusSidebar {
+			if tmpl := m.selectedTemplate(); tmpl != "" {
+				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
+				cwd, _ := os.Getwd()
+				projectDir := strings.ReplaceAll(cwd, "/", "-")
+				store.Delete(projectDir, tmpl)
+				// Rebuild sidebar
+				m.templates, _ = store.ListAll()
+				m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+				if m.sidebarCursor >= len(m.sidebarItems) {
+					m.sidebarCursor = len(m.sidebarItems) - 1
+				}
+				m.syncResult = fmt.Sprintf("template '%s' deleted", tmpl)
+			}
+		}
 	}
 	return m, nil
 }
@@ -533,6 +551,11 @@ func (m Model) renderSidebar(w, h int) string {
 }
 
 func (m Model) renderListPane(w int) string {
+	// If a template is selected in sidebar, show template detail instead
+	if tmpl := m.selectedTemplate(); tmpl != "" {
+		return m.renderTemplatePane(w, tmpl)
+	}
+
 	var b strings.Builder
 
 	// Filter bar
@@ -568,6 +591,54 @@ func (m Model) renderListPane(w int) string {
 	if len(m.filtered) == 0 {
 		b.WriteString("\n" + lipgloss.NewStyle().Foreground(dimGray).Render("  No sessions") + "\n")
 	}
+
+	return b.String()
+}
+
+func (m Model) renderTemplatePane(w int, name string) string {
+	var b strings.Builder
+
+	// Find template meta
+	var meta *template.Meta
+	for i := range m.templates {
+		if m.templates[i].Name == name {
+			meta = &m.templates[i]
+			break
+		}
+	}
+
+	if meta == nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(dimGray).Render("  Template not found") + "\n")
+		return b.String()
+	}
+
+	// Header
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(purple1).Render("  ◆ "+meta.Name) + "\n\n")
+
+	// Metadata
+	lbl := func(l string) string { return lipgloss.NewStyle().Foreground(midGray).Width(14).Render("  " + l) }
+	val := func(v string) string { return lipgloss.NewStyle().Foreground(text).Render(v) }
+
+	if meta.Description != "" {
+		b.WriteString(lbl("Description") + val(meta.Description) + "\n")
+	}
+	b.WriteString(lbl("Project") + val(filepath.Base(meta.SourceProject)) + "\n")
+	b.WriteString(lbl("Created") + val(humanize.Time(meta.CreatedAt)) + "\n")
+	b.WriteString(lbl("Entries") + val(fmt.Sprintf("%d", meta.EntryCount)) + "\n")
+	b.WriteString(lbl("Size") + val(humanize.Bytes(uint64(meta.SizeBytes))) + "\n")
+	if meta.Trimmed {
+		b.WriteString(lbl("Trimmed") + val("yes") + "\n")
+	}
+
+	// Actions
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(midGray).Render("  ACTIONS") + "\n\n")
+
+	enterKey := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("⏎")
+	deleteKey := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("d")
+
+	b.WriteString("  " + enterKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Spawn new session from this template") + "\n")
+	b.WriteString("  " + deleteKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Delete this template") + "\n")
 
 	return b.String()
 }
