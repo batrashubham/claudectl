@@ -23,15 +23,7 @@ var rootCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if needsSetup() {
-			if err := runSetup(); err != nil {
-				return err
-			}
-			// Reload config after setup
-			var err error
-			cfg, err = config.Load()
-			if err != nil {
-				return err
-			}
+			fmt.Println("Using defaults. Run 'claudectl setup' to customize.")
 		}
 		return runTUI()
 	},
