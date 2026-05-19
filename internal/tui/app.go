@@ -326,46 +326,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = dashboardView
 	case msg.String() == "t":
 		if m.focus == focusSidebar {
-			// Update template from most recent session in the project
+			// Rewarm: spawn from template and exit to CLI for re-exploration
 			if tmpl := m.selectedTemplate(); tmpl != "" {
-				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
-				cwd, _ := os.Getwd()
-				projectDir := strings.ReplaceAll(cwd, "/", "-")
-				meta, err := store.ReadMeta(projectDir, tmpl)
-				if err != nil {
-					m.syncResult = fmt.Sprintf("template not found: %v", err)
-				} else {
-					// Find most recent session for this project
-					var newest *index.SessionMeta
-					for i := range m.sessions {
-						s := &m.sessions[i]
-						if s.FileSize > 0 && s.ProjectDir == meta.ProjectDir {
-							if newest == nil || s.LastSeen.After(newest.LastSeen) {
-								newest = s
-							}
-						}
-					}
-					if newest == nil {
-						m.syncResult = "no sessions found to update template from"
-					} else {
-						err := store.Save(template.SaveOptions{
-							SessionID:   newest.ID,
-							ProjectDir:  newest.ProjectDir,
-							Project:     newest.Project,
-							Name:        tmpl,
-							Description: meta.Description,
-							Trim:        true,
-							Force:       true,
-						})
-						if err != nil {
-							m.syncResult = fmt.Sprintf("update failed: %v", err)
-						} else {
-							m.syncResult = fmt.Sprintf("template '%s' updated from %s", tmpl, newest.ID[:12])
-							m.templates, _ = store.ListAll()
-							m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
-						}
-					}
-				}
+				m.spawnTmpl = tmpl
+				m.syncResult = "rewarm: re-explore then save back with 't' on a session"
+				return m, tea.Quit
 			}
 		} else if m.focus == focusList && len(m.filtered) > 0 {
 			// Save current session as new template
@@ -754,7 +719,7 @@ func (m Model) renderTemplatePane(w int, name string) string {
 	deleteKey := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("d")
 
 	b.WriteString("  " + enterKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Spawn new session from this template") + "\n")
-	b.WriteString("  " + updateKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Update with latest session (re-warm)") + "\n")
+	b.WriteString("  " + updateKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Re-warm (spawn + re-explore codebase)") + "\n")
 	b.WriteString("  " + deleteKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Delete this template") + "\n")
 
 	return b.String()

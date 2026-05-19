@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/template"
@@ -235,20 +236,20 @@ var templateInspectCmd = &cobra.Command{
 	},
 }
 
-// === UPDATE ===
+// === REWARM ===
 
-var templateUpdateCmd = &cobra.Command{
-	Use:   "update <template-name> <session-id>",
-	Short: "Update a template with a newer session (re-warm)",
-	Long: `Replace an existing template with a new session's content.
+var templateRewarmCmd = &cobra.Command{
+	Use:   "rewarm <template-name>",
+	Short: "Spawn a session from template for re-exploration, then save back",
+	Long: `Start a session from an existing template with a re-warm prompt.
 
-Use this when your codebase has evolved and the template's context
-is stale. The template keeps its name and description but gets
-fresh content from the specified session.`,
-	Args: cobra.ExactArgs(2),
+Use when your codebase has evolved and the template is stale.
+Claude will start with the old context and re-explore the project.
+When done, save the session back as the template with 't' in the TUI
+or 'claudectl template save <new-session-id> --name <name> --force'.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		sessionID := args[1]
 
 		projectDir := currentProjectDir()
 		if projectDir == "" {
@@ -256,47 +257,44 @@ fresh content from the specified session.`,
 		}
 
 		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
-		meta, err := store.ReadMeta(projectDir, name)
-		if err != nil {
+		if _, err := store.ReadMeta(projectDir, name); err != nil {
 			return fmt.Errorf("template '%s' not found", name)
 		}
 
-		// Resolve session
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
-		sessions, err := builder.Build()
+		// Spawn from template
+		result, err := store.Spawn(projectDir, name)
 		if err != nil {
 			return err
 		}
 
-		var target *index.SessionMeta
-		for i := range sessions {
-			if sessions[i].ID == sessionID {
-				target = &sessions[i]
-				break
+		// Append a rewarm prompt to the spawned session
+		sessionPath := filepath.Join(cfg.ClaudeDir, "projects", projectDir, result.SessionID+".jsonl")
+		f, err := os.OpenFile(sessionPath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("could not append rewarm prompt: %w", err)
+		}
+
+		rewarmEntry := fmt.Sprintf(`{"type":"user","sessionId":"%s","message":{"content":[{"type":"text","text":"The codebase has evolved since your last exploration. Please re-read the project structure, check for new/changed files, and update your understanding of the architecture, patterns, and key decisions. Focus on what has changed rather than re-reading everything."}]},"timestamp":%d}`,
+			result.SessionID, time.Now().UnixMilli())
+		f.WriteString(rewarmEntry + "\n")
+		f.Close()
+
+		fmt.Printf("✓ Spawned rewarm session %s from template '%s'\n", result.SessionID[:12], name)
+		fmt.Println("  Claude will re-explore the project with the rewarm prompt.")
+		fmt.Println("  When done, save back with:")
+		fmt.Printf("    claudectl template save %s --name %s --force --trim\n", result.SessionID, name)
+
+		// Resume
+		claudeBin, err := exec.LookPath("claude")
+		if err != nil {
+			return fmt.Errorf("claude not found: %w", err)
+		}
+		if result.Project != "" {
+			if _, statErr := os.Stat(result.Project); statErr == nil {
+				os.Chdir(result.Project)
 			}
 		}
-		if target == nil {
-			return fmt.Errorf("session %s not found", sessionID)
-		}
-
-		// Re-save with existing name and description, force overwrite
-		err = store.Save(template.SaveOptions{
-			SessionID:   target.ID,
-			ProjectDir:  target.ProjectDir,
-			Project:     target.Project,
-			Name:        name,
-			Description: meta.Description,
-			Trim:        true,
-			Force:       true,
-		})
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("✓ Template '%s' updated from session %s\n", name, sessionID[:12])
-		fmt.Printf("  Previous source: %s\n", meta.SourceSessionID[:12])
-		fmt.Printf("  New source:      %s\n", target.ID[:12])
-		return nil
+		return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID}, os.Environ())
 	},
 }
 
@@ -315,7 +313,7 @@ func init() {
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateDeleteCmd)
 	templateCmd.AddCommand(templateInspectCmd)
-	templateCmd.AddCommand(templateUpdateCmd)
+	templateCmd.AddCommand(templateRewarmCmd)
 
 	rootCmd.AddCommand(templateCmd)
 }
