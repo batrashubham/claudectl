@@ -195,6 +195,9 @@ func (e *Engine) GitCommit(result *Result) error {
 		if err := runGit(gitDir, "init"); err != nil {
 			return fmt.Errorf("git init: %w", err)
 		}
+		// Safe multi-machine merge: append-only files use union strategy
+		gitattrs := filepath.Join(gitDir, ".gitattributes")
+		os.WriteFile(gitattrs, []byte("history.jsonl merge=union\n"), 0644)
 	}
 
 	if err := runGit(gitDir, "add", "-A"); err != nil {
