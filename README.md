@@ -168,7 +168,9 @@ claudectl template spawn warm-context --resume
 # Or from TUI: press 't' on a session to save, Enter on template to spawn
 ```
 
-Templates are project-scoped and backed up with sync. Use `--trim` to strip non-essential entries (titles, queue ops) and keep the template lean.
+Templates are project-scoped and backed up with sync. Use `--trim` to strip non-essential entries and keep the template lean.
+
+**What `--trim` removes:** `last-prompt` (UI state), `custom-title` (cosmetic), `agent-name` (cosmetic), `queue-operation` (operational logs), `file-history-snapshot` (stale file state). **What it keeps:** all `user`, `assistant`, `attachment`, and `permission-mode` entries — the actual conversation and tool results that form Claude's understanding. If in doubt, omit `--trim` to keep everything.
 
 ## Dashboard & Analytics
 
@@ -284,6 +286,17 @@ When you resume an archived session:
         └── -Users-you-code-project-b/
             └── def456.jsonl
 ```
+
+## Security
+
+**Your session transcripts may contain secrets.** Claude Code sessions can include API keys, passwords, tokens, and other sensitive data that appeared in tool results or conversation context.
+
+- **Always use a private git remote** for your backup repo
+- **Never push to a public repository** — your entire Claude Code history would be exposed
+- claudectl does not encrypt data at rest or in transit (beyond what git/SSH provides)
+- Consider using a dedicated private repo (not your main code repo) for backups
+
+If you accidentally push to a public repo, rotate any credentials that may have appeared in your sessions immediately.
 
 ## Requirements
 
