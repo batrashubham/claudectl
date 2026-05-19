@@ -40,7 +40,7 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("GitPush should default to false")
 	}
 
-	expectedTemplates := filepath.Join(home, ".claudectl", "templates")
+	expectedTemplates := filepath.Join(home, ".claudectl", "backup", "templates")
 	if cfg.TemplatesDir != expectedTemplates {
 		t.Errorf("TemplatesDir = %q, want %q", cfg.TemplatesDir, expectedTemplates)
 	}
@@ -79,7 +79,6 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 		GitAutoCommit: true,
 		GitRemote:     "git@github.com:user/repo.git",
 		GitPush:       true,
-		TemplatesDir:  "/custom/templates",
 	}
 
 	// Encode to file
@@ -117,8 +116,9 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	if loaded.GitPush != original.GitPush {
 		t.Errorf("GitPush = %v, want %v", loaded.GitPush, original.GitPush)
 	}
-	if loaded.TemplatesDir != original.TemplatesDir {
-		t.Errorf("TemplatesDir = %q, want %q", loaded.TemplatesDir, original.TemplatesDir)
+	// TemplatesDir is derived from BackupDir, not stored in TOML
+	if loaded.TemplatesDir != "" {
+		t.Errorf("TemplatesDir should be empty from TOML decode (derived field), got %q", loaded.TemplatesDir)
 	}
 }
 

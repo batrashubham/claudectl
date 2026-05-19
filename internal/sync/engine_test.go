@@ -258,46 +258,30 @@ func TestSync_LockfilePreventsConccurentSync(t *testing.T) {
 	}
 }
 
-func TestSync_TemplatesSync(t *testing.T) {
+func TestSync_TemplatesInBackupSurviveSync(t *testing.T) {
+	// Templates live directly in backup/templates/. Verify sync doesn't disturb them.
 	tmpDir := t.TempDir()
 	claudeDir := filepath.Join(tmpDir, "claude")
 	backupDir := filepath.Join(tmpDir, "backup")
-	templatesDir := filepath.Join(tmpDir, "templates")
 
 	os.MkdirAll(filepath.Join(claudeDir, "projects"), 0755)
-	os.MkdirAll(templatesDir, 0755)
+	os.MkdirAll(filepath.Join(backupDir, "templates"), 0755)
 
-	// Create template files
-	os.WriteFile(filepath.Join(templatesDir, "template1.json"), []byte(`{"name":"t1"}`), 0644)
-	os.MkdirAll(filepath.Join(templatesDir, "subdir"), 0755)
-	os.WriteFile(filepath.Join(templatesDir, "subdir", "template2.json"), []byte(`{"name":"t2"}`), 0644)
+	// Pre-place a template in backup/templates/
+	os.WriteFile(filepath.Join(backupDir, "templates", "meta.json"), []byte(`{"name":"warm"}`), 0644)
 
 	e := NewEngine(claudeDir, backupDir)
-	e.SetTemplatesDir(templatesDir)
-
-	result, err := e.Sync()
+	_, err := e.Sync()
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)
 	}
 
-	if result.NewFiles < 2 {
-		t.Errorf("expected at least 2 new template files, got %d new", result.NewFiles)
-	}
-
-	// Verify template files are in backup/templates/
-	t1Content, err := os.ReadFile(filepath.Join(backupDir, "templates", "template1.json"))
+	// Template file should still be there untouched
+	content, err := os.ReadFile(filepath.Join(backupDir, "templates", "meta.json"))
 	if err != nil {
-		t.Fatalf("template1.json not in backup: %v", err)
+		t.Fatalf("template file disappeared after sync: %v", err)
 	}
-	if string(t1Content) != `{"name":"t1"}` {
-		t.Errorf("template1 content mismatch: %q", string(t1Content))
-	}
-
-	t2Content, err := os.ReadFile(filepath.Join(backupDir, "templates", "subdir", "template2.json"))
-	if err != nil {
-		t.Fatalf("template2.json not in backup: %v", err)
-	}
-	if string(t2Content) != `{"name":"t2"}` {
-		t.Errorf("template2 content mismatch: %q", string(t2Content))
+	if string(content) != `{"name":"warm"}` {
+		t.Errorf("template content changed: %q", string(content))
 	}
 }

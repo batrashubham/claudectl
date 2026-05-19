@@ -221,7 +221,6 @@ Config lives at `~/.claudectl/config.toml`:
 ```toml
 backup_dir = "~/.claudectl/backup"
 claude_dir = "~/.claude"
-templates_dir = "~/.claudectl/templates"
 sync_on_start = true
 git_auto_commit = true
 git_remote = "git@github.com:you/claude-backup.git"
@@ -232,11 +231,12 @@ git_push = true
 |-------|---------|-------------|
 | `backup_dir` | `~/.claudectl/backup` | Where to store the backup (git repo) |
 | `claude_dir` | `~/.claude` | Claude Code's config directory |
-| `templates_dir` | `~/.claudectl/templates` | Where to store session templates |
 | `sync_on_start` | `true` | Auto-sync when TUI launches |
 | `git_auto_commit` | `true` | Commit after each sync |
 | `git_remote` | `""` | Git remote URL for pushing backups |
 | `git_push` | `false` | Push to remote after each commit |
+
+Templates are stored at `<backup_dir>/templates/` — automatically git-versioned with the rest of your backup.
 
 ## How It Works
 
@@ -269,15 +269,14 @@ When you resume an archived session:
 ```
 ~/.claudectl/
 ├── config.toml
-├── templates/                # session templates (project-scoped)
-│   └── -Users-you-code-project-a/
-│       └── warm-context/
-│           ├── meta.json
-│           ├── session.jsonl
-│           └── subagents/
 └── backup/                   # git repo (synced + pushed)
+    ├── .gitattributes        # merge=union for history.jsonl
     ├── history.jsonl
-    ├── templates/            # templates backed up here too
+    ├── templates/            # session templates (project-scoped)
+    │   └── -Users-you-code-project-a/
+    │       └── warm-context/
+    │           ├── meta.json
+    │           └── session.jsonl
     └── projects/
         ├── -Users-you-code-project-a/
         │   ├── abc123.jsonl

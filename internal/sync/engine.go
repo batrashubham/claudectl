@@ -16,17 +16,12 @@ type Result struct {
 }
 
 type Engine struct {
-	claudeDir    string
-	backupDir    string
-	templatesDir string
+	claudeDir string
+	backupDir string
 }
 
 func NewEngine(claudeDir, backupDir string) *Engine {
 	return &Engine{claudeDir: claudeDir, backupDir: backupDir}
-}
-
-func (e *Engine) SetTemplatesDir(dir string) {
-	e.templatesDir = dir
 }
 
 func (e *Engine) lockPath() string {
@@ -113,36 +108,6 @@ func (e *Engine) Sync() (*Result, error) {
 
 	if err != nil {
 		return result, err
-	}
-
-	// Sync templates directory
-	if e.templatesDir != "" {
-		if _, statErr := os.Stat(e.templatesDir); statErr == nil {
-			templatesDst := filepath.Join(e.backupDir, "templates")
-
-			filepath.Walk(e.templatesDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
-					return nil
-				}
-				relPath, _ := filepath.Rel(e.templatesDir, path)
-				dstPath := filepath.Join(templatesDst, relPath)
-
-				_, existsAlready := os.Stat(dstPath)
-				synced, bytes, syncErr := e.syncFile(path, dstPath)
-				if syncErr != nil {
-					return nil
-				}
-				if synced {
-					if existsAlready == nil {
-						result.UpdatedFiles++
-					} else {
-						result.NewFiles++
-					}
-					result.TotalBytes += bytes
-				}
-				return nil
-			})
-		}
 	}
 
 	return result, nil

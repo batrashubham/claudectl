@@ -37,7 +37,6 @@ func init() {
 
 func runSyncOnce() error {
 	engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
-	engine.SetTemplatesDir(cfg.TemplatesDir)
 
 	fmt.Printf("Syncing %s → %s\n", cfg.ClaudeDir+"/projects", cfg.BackupDir)
 
@@ -81,7 +80,6 @@ func runSyncWatch() error {
 
 	for {
 		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
-		engine.SetTemplatesDir(cfg.TemplatesDir)
 
 		if cfg.GitRemote != "" {
 			engine.GitSetupRemote(cfg.GitRemote)

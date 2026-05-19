@@ -14,19 +14,20 @@ type Config struct {
 	GitAutoCommit bool   `toml:"git_auto_commit"`
 	GitRemote     string `toml:"git_remote"`
 	GitPush       bool   `toml:"git_push"`
-	TemplatesDir  string `toml:"templates_dir"`
+	TemplatesDir  string `toml:"-"` // derived from BackupDir, not stored in config
 }
 
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
+	backupDir := filepath.Join(home, ".claudectl", "backup")
 	return &Config{
-		BackupDir:     filepath.Join(home, ".claudectl", "backup"),
+		BackupDir:     backupDir,
 		ClaudeDir:     filepath.Join(home, ".claude"),
 		SyncOnStart:   true,
 		GitAutoCommit: true,
 		GitRemote:     "",
 		GitPush:       false,
-		TemplatesDir:  filepath.Join(home, ".claudectl", "templates"),
+		TemplatesDir:  filepath.Join(backupDir, "templates"),
 	}
 }
 
@@ -50,6 +51,7 @@ func Load() (*Config, error) {
 
 	cfg.BackupDir = expandHome(cfg.BackupDir)
 	cfg.ClaudeDir = expandHome(cfg.ClaudeDir)
+	cfg.TemplatesDir = filepath.Join(cfg.BackupDir, "templates")
 
 	return cfg, nil
 }
