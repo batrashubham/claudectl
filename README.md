@@ -12,7 +12,7 @@ Claude Code deletes session transcripts after 30 days. If you want to revisit an
 - **Indexing** sessions with metadata from `history.jsonl` (prompts, timestamps, projects)
 - **Resuming** archived sessions by restoring them back to Claude's projects directory
 - **Starter sessions** — save warm sessions as templates, spawn new ones pre-loaded with context
-- **Multi-machine** — push to a git remote, restore on any machine
+- **Backup & restore** — push to a git remote, restore on any machine when needed
 
 ## Install
 
@@ -195,20 +195,22 @@ claudectl import their-session.jsonl --project /path/to/project --resume
 
 Import rewrites session IDs so there are no conflicts with your own sessions.
 
-## Multi-Machine Sync
+## Backup & Restore
 
-Back up sessions to a git remote and restore on any machine:
+Push your backup to a git remote for safekeeping. Restore on another machine when needed:
 
 ```bash
-# Machine A: sync and push
+# Back up (happens automatically, or manually)
 claudectl sync
 
-# Machine B: restore from remote
+# Restore from remote on a different machine
 claudectl restore
 
-# Machine B: browse and resume any session
+# Browse and resume any session
 claudectl
 ```
+
+This is backup/restore, not real-time sync — you control when to push and when to pull.
 
 ## Configuration
 

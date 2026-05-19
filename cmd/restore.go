@@ -10,11 +10,10 @@ import (
 
 var restoreCmd = &cobra.Command{
 	Use:   "restore",
-	Short: "Restore sessions from git remote (for multi-machine sync)",
-	Long: `Fetch the latest session backups from the configured git remote.
+	Short: "Restore sessions from git remote backup",
+	Long: `Restore session backups from the configured git remote.
 
-Use this on a new machine to get all sessions backed up from another computer,
-or to stay in sync across multiple workstations.
+Use this to restore your backed-up sessions on a new or different machine.
 
 If the backup directory doesn't exist yet and a git_remote is configured,
 this will clone the repo. Otherwise it pulls the latest changes.`,
