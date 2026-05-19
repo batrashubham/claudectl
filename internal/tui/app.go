@@ -23,6 +23,7 @@ const (
 	listView viewState = iota
 	detailView
 	searchView
+	dashboardView
 )
 
 type filterMode int
@@ -219,6 +220,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case detailView:
 			return m.updateDetail(msg)
+		case dashboardView:
+			return m.updateDashboard(msg)
 		default:
 			return m.updateList(msg)
 		}
@@ -319,6 +322,8 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.applyFilter()
 		m.cursor = 0
 		m.offset = 0
+	case msg.String() == "D":
+		m.state = dashboardView
 	case msg.String() == "t":
 		// Save current session as template
 		if m.focus == focusList && len(m.filtered) > 0 {
@@ -493,6 +498,8 @@ func (m Model) View() string {
 	switch m.state {
 	case detailView:
 		return m.viewDetail()
+	case dashboardView:
+		return m.viewDashboard()
 	default:
 		return m.viewList()
 	}
@@ -863,10 +870,11 @@ func (m Model) renderHelp() string {
 		{"tab", "pane"},
 		{"⏎", "detail/spawn"},
 		{"r", "resume"},
-		{"t", "save template"},
+		{"t", "template"},
 		{"/", "search"},
 		{"s", "sync"},
 		{"f", "filter"},
+		{"D", "dashboard"},
 		{"q", "quit"},
 	}
 
