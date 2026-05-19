@@ -40,34 +40,17 @@ Downloads the right binary for your OS/arch and installs to `/usr/local/bin`.
 
 ## Quick Start
 
-Run `claudectl` for the first time and it walks you through setup:
+```bash
+# Install
+curl -sSL https://raw.githubusercontent.com/batrashubham/claudectl/main/install.sh | sh
 
-```
-$ claudectl
-
-⚡ Welcome to claudectl
-─────────────────────────────────────
-Let's set up session backup for Claude Code.
-
-Backup directory [~/.claudectl/backup]:
-✓ Backup directory: /home/user/.claudectl/backup
-
-Git remote URL (blank to skip): git@github.com:you/claude-backup.git
-✓ Remote configured
-
-Install cron job? [Y/n]: y
-Sync interval in minutes [5]:
-✓ Cron installed: syncing every 5 minutes
-
-✓ Config saved: ~/.claudectl/config.toml
-
-Run initial sync now? [Y/n]: y
-Done: 295 new, 0 updated (87 MB)
-─────────────────────────────────────
-Setup complete! Run 'claudectl' to launch the TUI.
+# Run — works immediately with zero config
+claudectl
 ```
 
-After setup, just run `claudectl` to open the TUI.
+First run uses sane defaults (backup at `~/.claudectl/backup/`, auto-sync on launch). No setup wizard needed.
+
+For git remote push, cron scheduling, or custom paths, run `claudectl setup`.
 
 ## Usage
 
@@ -79,6 +62,10 @@ claudectl list           # Plain text session list
 claudectl list --json    # JSON output for scripting
 claudectl resume <id>    # Resume a session directly by ID
 claudectl restore        # Pull latest backup from git remote
+claudectl export <id>    # Export session as readable markdown
+claudectl import <file> -p <project>  # Import a .jsonl session file
+claudectl dashboard      # Usage analytics (tokens, activity, projects)
+claudectl status         # Quick health check (backup size, sync, cron)
 claudectl template save <id> --name <name>   # Save session as template
 claudectl template spawn <name> --resume     # Start new session from template
 claudectl template list                      # List available templates
@@ -134,6 +121,7 @@ TEMPLATES            │    ○ api-service                          3w
 | `f` | Cycle filter: All → Active → Archive → Ghost |
 | `s` | Sync now |
 | `g/G` | Jump to top/bottom |
+| `Shift+D` | Usage dashboard (stats, activity, tokens) |
 | `q` | Quit |
 
 ### Sidebar
@@ -181,6 +169,31 @@ claudectl template spawn warm-context --resume
 ```
 
 Templates are project-scoped and backed up with sync. Use `--trim` to strip non-essential entries (titles, queue ops) and keep the template lean.
+
+## Dashboard & Analytics
+
+Press `Shift+D` in the TUI (or run `claudectl dashboard`) to see:
+
+- **Session stats** — total count, prompts, estimated tokens, longest session
+- **Weekly activity** — bar chart of prompts per week, peak day/hour
+- **Project breakdown** — sessions, prompts, and last active per project
+- **Template stats** — count and names
+
+All computed locally from your `history.jsonl` — no telemetry, no cloud.
+
+## Import & Export
+
+Share sessions with teammates:
+
+```bash
+# Export a session as readable markdown
+claudectl export <session-id> -o session.md
+
+# Import a colleague's session file
+claudectl import their-session.jsonl --project /path/to/project --resume
+```
+
+Import rewrites session IDs so there are no conflicts with your own sessions.
 
 ## Multi-Machine Sync
 
