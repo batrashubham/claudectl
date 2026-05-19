@@ -235,6 +235,71 @@ var templateInspectCmd = &cobra.Command{
 	},
 }
 
+// === UPDATE ===
+
+var templateUpdateCmd = &cobra.Command{
+	Use:   "update <template-name> <session-id>",
+	Short: "Update a template with a newer session (re-warm)",
+	Long: `Replace an existing template with a new session's content.
+
+Use this when your codebase has evolved and the template's context
+is stale. The template keeps its name and description but gets
+fresh content from the specified session.`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		sessionID := args[1]
+
+		projectDir := currentProjectDir()
+		if projectDir == "" {
+			return fmt.Errorf("could not determine current project")
+		}
+
+		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+		meta, err := store.ReadMeta(projectDir, name)
+		if err != nil {
+			return fmt.Errorf("template '%s' not found", name)
+		}
+
+		// Resolve session
+		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
+		sessions, err := builder.Build()
+		if err != nil {
+			return err
+		}
+
+		var target *index.SessionMeta
+		for i := range sessions {
+			if sessions[i].ID == sessionID {
+				target = &sessions[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("session %s not found", sessionID)
+		}
+
+		// Re-save with existing name and description, force overwrite
+		err = store.Save(template.SaveOptions{
+			SessionID:   target.ID,
+			ProjectDir:  target.ProjectDir,
+			Project:     target.Project,
+			Name:        name,
+			Description: meta.Description,
+			Trim:        true,
+			Force:       true,
+		})
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("✓ Template '%s' updated from session %s\n", name, sessionID[:12])
+		fmt.Printf("  Previous source: %s\n", meta.SourceSessionID[:12])
+		fmt.Printf("  New source:      %s\n", target.ID[:12])
+		return nil
+	},
+}
+
 func init() {
 	templateSaveCmd.Flags().StringVar(&saveName, "name", "", "Template name (required)")
 	templateSaveCmd.Flags().StringVar(&saveDescription, "description", "", "Template description")
@@ -250,6 +315,7 @@ func init() {
 	templateCmd.AddCommand(templateListCmd)
 	templateCmd.AddCommand(templateDeleteCmd)
 	templateCmd.AddCommand(templateInspectCmd)
+	templateCmd.AddCommand(templateUpdateCmd)
 
 	rootCmd.AddCommand(templateCmd)
 }

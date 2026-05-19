@@ -325,8 +325,50 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "D":
 		m.state = dashboardView
 	case msg.String() == "t":
-		// Save current session as template
-		if m.focus == focusList && len(m.filtered) > 0 {
+		if m.focus == focusSidebar {
+			// Update template from most recent session in the project
+			if tmpl := m.selectedTemplate(); tmpl != "" {
+				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
+				cwd, _ := os.Getwd()
+				projectDir := strings.ReplaceAll(cwd, "/", "-")
+				meta, err := store.ReadMeta(projectDir, tmpl)
+				if err != nil {
+					m.syncResult = fmt.Sprintf("template not found: %v", err)
+				} else {
+					// Find most recent session for this project
+					var newest *index.SessionMeta
+					for i := range m.sessions {
+						s := &m.sessions[i]
+						if s.FileSize > 0 && s.ProjectDir == meta.ProjectDir {
+							if newest == nil || s.LastSeen.After(newest.LastSeen) {
+								newest = s
+							}
+						}
+					}
+					if newest == nil {
+						m.syncResult = "no sessions found to update template from"
+					} else {
+						err := store.Save(template.SaveOptions{
+							SessionID:   newest.ID,
+							ProjectDir:  newest.ProjectDir,
+							Project:     newest.Project,
+							Name:        tmpl,
+							Description: meta.Description,
+							Trim:        true,
+							Force:       true,
+						})
+						if err != nil {
+							m.syncResult = fmt.Sprintf("update failed: %v", err)
+						} else {
+							m.syncResult = fmt.Sprintf("template '%s' updated from %s", tmpl, newest.ID[:12])
+							m.templates, _ = store.ListAll()
+							m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+						}
+					}
+				}
+			}
+		} else if m.focus == focusList && len(m.filtered) > 0 {
+			// Save current session as new template
 			s := m.filtered[m.cursor]
 			if s.FileSize == 0 {
 				m.syncResult = "cannot save ghost session as template"
@@ -336,13 +378,13 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				name = name + "-warm"
 				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
 				err := store.Save(template.SaveOptions{
-					SessionID:  s.ID,
-					ProjectDir: s.ProjectDir,
-					Project:    s.Project,
-					Name:       name,
+					SessionID:   s.ID,
+					ProjectDir:  s.ProjectDir,
+					Project:     s.Project,
+					Name:        name,
 					Description: fmt.Sprintf("Warm context from %s", project),
-					Trim:       true,
-					Force:      true,
+					Trim:        true,
+					Force:       true,
 				})
 				if err != nil {
 					m.syncResult = fmt.Sprintf("save failed: %v", err)
@@ -708,9 +750,11 @@ func (m Model) renderTemplatePane(w int, name string) string {
 	b.WriteString(lipgloss.NewStyle().Foreground(midGray).Render("  ACTIONS") + "\n\n")
 
 	enterKey := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("⏎")
+	updateKey := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("t")
 	deleteKey := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("d")
 
 	b.WriteString("  " + enterKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Spawn new session from this template") + "\n")
+	b.WriteString("  " + updateKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Update with latest session (re-warm)") + "\n")
 	b.WriteString("  " + deleteKey + lipgloss.NewStyle().Foreground(ltGray).Render(" Delete this template") + "\n")
 
 	return b.String()
