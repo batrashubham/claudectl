@@ -31,6 +31,9 @@ func (e *Engine) lockPath() string {
 
 func (e *Engine) acquireLock() error {
 	lockFile := e.lockPath()
+	if err := os.MkdirAll(filepath.Dir(lockFile), 0755); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(lockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
 		if os.IsExist(err) {
