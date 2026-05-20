@@ -19,8 +19,19 @@ var cronCmd = &cobra.Command{
 var cronInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Add claudectl sync to your crontab",
+	Long: `Add claudectl sync to your crontab.
+
+Default interval is 5 minutes. Change with -i flag:
+  claudectl cron install -i 10    # every 10 minutes
+  claudectl cron install -i 1     # every minute`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return installCronJob()
+		if err := installCronJob(); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Installed: syncing every %d minutes\n", cronInterval)
+		fmt.Printf("  Logs: /tmp/claudectl-sync.log\n")
+		fmt.Printf("  Remove with: claudectl cron remove\n")
+		return nil
 	},
 }
 
