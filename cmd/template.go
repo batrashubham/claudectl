@@ -28,10 +28,11 @@ already loaded from a previous exploration.`,
 // === SAVE ===
 
 var (
-	saveName        string
-	saveDescription string
-	saveTrim        bool
-	saveForce       bool
+	saveName         string
+	saveDescription  string
+	saveRewarmPrompt string
+	saveTrim         bool
+	saveForce        bool
 )
 
 var templateSaveCmd = &cobra.Command{
@@ -64,13 +65,14 @@ var templateSaveCmd = &cobra.Command{
 
 		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
 		err = store.Save(template.SaveOptions{
-			SessionID:   target.ID,
-			ProjectDir:  target.ProjectDir,
-			Project:     target.Project,
-			Name:        saveName,
-			Description: saveDescription,
-			Trim:        saveTrim,
-			Force:       saveForce,
+			SessionID:    target.ID,
+			ProjectDir:   target.ProjectDir,
+			Project:      target.Project,
+			Name:         saveName,
+			Description:  saveDescription,
+			RewarmPrompt: saveRewarmPrompt,
+			Trim:         saveTrim,
+			Force:        saveForce,
 		})
 		if err != nil {
 			return err
@@ -256,7 +258,8 @@ or 'claudectl template save <new-session-id> --name <name> --force'.`,
 		}
 
 		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
-		if _, err := store.ReadMeta(projectDir, name); err != nil {
+		meta, err := store.ReadMeta(projectDir, name)
+		if err != nil {
 			return fmt.Errorf("template '%s' not found", name)
 		}
 
@@ -280,7 +283,10 @@ or 'claudectl template save <new-session-id> --name <name> --force'.`,
 				os.Chdir(result.Project)
 			}
 		}
-		rewarmPrompt := "The codebase has evolved since your last exploration. Please re-read the project structure, check for new/changed files, and update your understanding of the architecture, patterns, and key decisions. Focus on what has changed rather than re-reading everything."
+		rewarmPrompt := meta.RewarmPrompt
+		if rewarmPrompt == "" {
+			rewarmPrompt = template.DefaultRewarmPrompt
+		}
 		return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID, "-p", rewarmPrompt}, os.Environ())
 	},
 }
@@ -288,6 +294,7 @@ or 'claudectl template save <new-session-id> --name <name> --force'.`,
 func init() {
 	templateSaveCmd.Flags().StringVar(&saveName, "name", "", "Template name (required)")
 	templateSaveCmd.Flags().StringVar(&saveDescription, "description", "", "Template description")
+	templateSaveCmd.Flags().StringVar(&saveRewarmPrompt, "rewarm-prompt", "", "Custom prompt for template rewarm")
 	templateSaveCmd.Flags().BoolVar(&saveTrim, "trim", false, "Strip non-essential entries")
 	templateSaveCmd.Flags().BoolVar(&saveForce, "force", false, "Overwrite existing template")
 

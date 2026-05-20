@@ -12,6 +12,7 @@ import (
 type Meta struct {
 	Name            string    `json:"name"`
 	Description     string    `json:"description"`
+	RewarmPrompt    string    `json:"rewarmPrompt,omitempty"`
 	SourceProject   string    `json:"sourceProject"`
 	ProjectDir      string    `json:"projectDir"`
 	SourceSessionID string    `json:"sourceSessionId"`
@@ -21,6 +22,8 @@ type Meta struct {
 	Trimmed         bool      `json:"trimmed"`
 	HasSubagents    bool      `json:"hasSubagents"`
 }
+
+const DefaultRewarmPrompt = "The codebase has evolved since your last exploration. Please re-read the project structure, check for new/changed files, and update your understanding of the architecture, patterns, and key decisions. Focus on what has changed rather than re-reading everything."
 
 type Store struct {
 	baseDir   string

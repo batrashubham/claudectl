@@ -104,7 +104,12 @@ func runTUI() error {
 					os.Chdir(result.Project)
 				}
 			}
-			rewarmPrompt := "The codebase has evolved since your last exploration. Please re-read the project structure, check for new/changed files, and update your understanding of the architecture, patterns, and key decisions. Focus on what has changed rather than re-reading everything."
+			// Use custom rewarm prompt from template meta, or default
+			meta, _ := store.ReadMeta(projectDir, tmplName)
+			rewarmPrompt := template.DefaultRewarmPrompt
+			if meta != nil && meta.RewarmPrompt != "" {
+				rewarmPrompt = meta.RewarmPrompt
+			}
 			return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID, "-p", rewarmPrompt}, os.Environ())
 		}
 	}

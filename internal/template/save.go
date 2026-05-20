@@ -19,13 +19,14 @@ var trimTypes = map[string]bool{
 }
 
 type SaveOptions struct {
-	SessionID   string
-	ProjectDir  string
-	Project     string
-	Name        string
-	Description string
-	Trim        bool
-	Force       bool
+	SessionID    string
+	ProjectDir   string
+	Project      string
+	Name         string
+	Description  string
+	RewarmPrompt string
+	Trim         bool
+	Force        bool
 }
 
 func (s *Store) Save(opts SaveOptions) error {
@@ -75,6 +76,7 @@ func (s *Store) Save(opts SaveOptions) error {
 	meta := &Meta{
 		Name:            opts.Name,
 		Description:     opts.Description,
+		RewarmPrompt:    opts.RewarmPrompt,
 		SourceProject:   opts.Project,
 		ProjectDir:      opts.ProjectDir,
 		SourceSessionID: opts.SessionID,

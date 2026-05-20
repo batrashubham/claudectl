@@ -24,6 +24,7 @@ const (
 	detailView
 	searchView
 	dashboardView
+	namingView // naming a new template
 )
 
 type filterMode int
@@ -153,6 +154,7 @@ type Model struct {
 	resumeID    string
 	spawnTmpl   string
 	rewarmTmpl  string
+	namingForID string // session ID being saved as template
 }
 
 func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
@@ -223,6 +225,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.state {
 		case searchView:
 			return m.updateSearch(msg)
+		case namingView:
+			return m.updateNaming(msg)
 		case detailView:
 			return m.updateDetail(msg)
 		case dashboardView:
@@ -337,31 +341,18 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		} else if m.focus == focusList && len(m.filtered) > 0 {
-			// Save current session as new template
+			// Start naming mode for saving as template
 			s := m.filtered[m.cursor]
 			if s.FileSize == 0 {
 				m.syncResult = "cannot save ghost session as template"
 			} else {
+				m.namingForID = s.ID
 				project := filepath.Base(s.Project)
-				name := strings.ToLower(strings.ReplaceAll(project, " ", "-"))
-				name = name + "-warm"
-				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
-				err := store.Save(template.SaveOptions{
-					SessionID:   s.ID,
-					ProjectDir:  s.ProjectDir,
-					Project:     s.Project,
-					Name:        name,
-					Description: fmt.Sprintf("Warm context from %s", project),
-					Trim:        true,
-					Force:       true,
-				})
-				if err != nil {
-					m.syncResult = fmt.Sprintf("save failed: %v", err)
-				} else {
-					m.syncResult = fmt.Sprintf("template '%s' saved", name)
-					m.templates, _ = store.ListAll()
-					m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
-				}
+				defaultName := strings.ToLower(strings.ReplaceAll(project, " ", "-")) + "-warm"
+				m.search.SetValue(defaultName)
+				m.search.Focus()
+				m.state = namingView
+				return m, textinput.Blink
 			}
 		}
 	case msg.String() == "d":
@@ -406,6 +397,66 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.applyFilter()
 	m.cursor = 0
 	m.offset = 0
+	return m, cmd
+}
+
+func (m Model) updateNaming(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = listView
+		m.search.Blur()
+		m.search.SetValue("")
+		m.namingForID = ""
+		return m, nil
+	case "enter":
+		name := m.search.Value()
+		m.search.Blur()
+		m.search.SetValue("")
+		m.state = listView
+
+		if name == "" {
+			m.syncResult = "template name cannot be empty"
+			m.namingForID = ""
+			return m, nil
+		}
+
+		// Find the session
+		var target *index.SessionMeta
+		for i := range m.sessions {
+			if m.sessions[i].ID == m.namingForID {
+				target = &m.sessions[i]
+				break
+			}
+		}
+		m.namingForID = ""
+
+		if target == nil {
+			m.syncResult = "session not found"
+			return m, nil
+		}
+
+		store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
+		err := store.Save(template.SaveOptions{
+			SessionID:   target.ID,
+			ProjectDir:  target.ProjectDir,
+			Project:     target.Project,
+			Name:        name,
+			Description: fmt.Sprintf("Warm context from %s", filepath.Base(target.Project)),
+			Trim:        true,
+			Force:       true,
+		})
+		if err != nil {
+			m.syncResult = fmt.Sprintf("save failed: %v", err)
+		} else {
+			m.syncResult = fmt.Sprintf("template '%s' saved", name)
+			m.templates, _ = store.ListAll()
+			m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+		}
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.search, cmd = m.search.Update(msg)
 	return m, cmd
 }
 
@@ -645,7 +696,7 @@ func (m Model) renderListPane(w int) string {
 	// Filter bar
 	b.WriteString(m.renderFilters() + "\n")
 
-	// Search (if active)
+	// Search or naming input
 	if m.state == searchView {
 		searchInput := lipgloss.NewStyle().Foreground(text).Render(m.search.View())
 		searchContent := lipgloss.NewStyle().Foreground(purple2).Bold(true).Render("/") + " " + searchInput
@@ -656,6 +707,16 @@ func (m Model) renderListPane(w int) string {
 			PaddingLeft(1).
 			Render(searchContent)
 		b.WriteString(searchBox + "\n")
+	} else if m.state == namingView {
+		nameInput := lipgloss.NewStyle().Foreground(text).Render(m.search.View())
+		nameContent := lipgloss.NewStyle().Foreground(green).Bold(true).Render("name: ") + nameInput
+		nameBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(green).
+			Width(w - 4).
+			PaddingLeft(1).
+			Render(nameContent)
+		b.WriteString(nameBox + "\n")
 	}
 
 	// Sessions
