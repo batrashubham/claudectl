@@ -263,6 +263,70 @@ func TestSave_ForceOverwrite(t *testing.T) {
 	}
 }
 
+func TestSave_WithRewarmPrompt(t *testing.T) {
+	templatesDir, claudeDir := setupTestDirs(t)
+	store := NewStore(templatesDir, claudeDir)
+
+	customPrompt := "Focus on the API layer. Check for new endpoints and changed request schemas."
+	opts := SaveOptions{
+		SessionID:    testSessionID,
+		ProjectDir:   testProjectDir,
+		Project:      "my-project",
+		Name:         "with-rewarm",
+		Description:  "has custom rewarm",
+		RewarmPrompt: customPrompt,
+		Trim:         false,
+		Force:        false,
+	}
+
+	if err := store.Save(opts); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	meta, err := store.ReadMeta(testProjectDir, "with-rewarm")
+	if err != nil {
+		t.Fatalf("failed to read meta: %v", err)
+	}
+
+	if meta.RewarmPrompt != customPrompt {
+		t.Errorf("expected rewarm prompt %q, got %q", customPrompt, meta.RewarmPrompt)
+	}
+}
+
+func TestSave_WithoutRewarmPrompt_OmitsFromMeta(t *testing.T) {
+	templatesDir, claudeDir := setupTestDirs(t)
+	store := NewStore(templatesDir, claudeDir)
+
+	opts := SaveOptions{
+		SessionID:  testSessionID,
+		ProjectDir: testProjectDir,
+		Project:    "my-project",
+		Name:       "no-rewarm",
+		Trim:       false,
+		Force:      false,
+	}
+
+	if err := store.Save(opts); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	meta, err := store.ReadMeta(testProjectDir, "no-rewarm")
+	if err != nil {
+		t.Fatalf("failed to read meta: %v", err)
+	}
+
+	if meta.RewarmPrompt != "" {
+		t.Errorf("expected empty rewarm prompt, got %q", meta.RewarmPrompt)
+	}
+
+	// Verify omitempty works - raw JSON shouldn't contain rewarmPrompt key
+	metaPath := filepath.Join(templatesDir, testProjectDir, "no-rewarm", "meta.json")
+	data, _ := os.ReadFile(metaPath)
+	if strings.Contains(string(data), "rewarmPrompt") {
+		t.Error("expected rewarmPrompt to be omitted from JSON when empty")
+	}
+}
+
 func TestSave_WithoutForce_ErrorsOnExisting(t *testing.T) {
 	templatesDir, claudeDir := setupTestDirs(t)
 	store := NewStore(templatesDir, claudeDir)
