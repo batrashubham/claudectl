@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -56,10 +55,13 @@ func runTUI() error {
 
 		// Spawn from template
 		if tmplName := m.SpawnTemplate(); tmplName != "" {
-			cwd, _ := os.Getwd()
-			projectDir := strings.ReplaceAll(cwd, "/", "-")
-
 			store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+			projectDir := findTemplateProjectDir(store, tmplName)
+			if projectDir == "" {
+				fmt.Fprintf(os.Stderr, "template '%s' not found\n", tmplName)
+				os.Exit(1)
+			}
+
 			result, err := store.Spawn(projectDir, tmplName)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "spawn failed: %v\n", err)
@@ -82,10 +84,13 @@ func runTUI() error {
 
 		// Rewarm template (spawn + rewarm prompt)
 		if tmplName := m.RewarmTemplate(); tmplName != "" {
-			cwd, _ := os.Getwd()
-			projectDir := strings.ReplaceAll(cwd, "/", "-")
-
 			store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+			projectDir := findTemplateProjectDir(store, tmplName)
+			if projectDir == "" {
+				fmt.Fprintf(os.Stderr, "template '%s' not found\n", tmplName)
+				os.Exit(1)
+			}
+
 			result, err := store.Spawn(projectDir, tmplName)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "rewarm failed: %v\n", err)
@@ -115,4 +120,14 @@ func runTUI() error {
 	}
 
 	return nil
+}
+
+func findTemplateProjectDir(store *template.Store, name string) string {
+	all, _ := store.ListAll()
+	for _, t := range all {
+		if t.Name == name {
+			return t.ProjectDir
+		}
+	}
+	return ""
 }
