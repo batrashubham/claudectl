@@ -18,6 +18,7 @@ var configCmd = &cobra.Command{
 		fmt.Printf("Git auto-commit: %v\n", cfg.GitAutoCommit)
 		fmt.Printf("Git remote:      %s\n", cfg.GitRemote)
 		fmt.Printf("Git push:        %v\n", cfg.GitPush)
+		fmt.Printf("Templates dir:   %s\n", cfg.TemplatesDir)
 		return nil
 	},
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"syscall"
 	"text/tabwriter"
-	"time"
 
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/template"
@@ -267,24 +266,11 @@ or 'claudectl template save <new-session-id> --name <name> --force'.`,
 			return err
 		}
 
-		// Append a rewarm prompt to the spawned session
-		sessionPath := filepath.Join(cfg.ClaudeDir, "projects", projectDir, result.SessionID+".jsonl")
-		f, err := os.OpenFile(sessionPath, os.O_APPEND|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("could not append rewarm prompt: %w", err)
-		}
-
-		rewarmEntry := fmt.Sprintf(`{"type":"user","sessionId":"%s","message":{"content":[{"type":"text","text":"The codebase has evolved since your last exploration. Please re-read the project structure, check for new/changed files, and update your understanding of the architecture, patterns, and key decisions. Focus on what has changed rather than re-reading everything."}]},"timestamp":%d}`,
-			result.SessionID, time.Now().UnixMilli())
-		f.WriteString(rewarmEntry + "\n")
-		f.Close()
-
 		fmt.Printf("✓ Spawned rewarm session %s from template '%s'\n", result.SessionID[:12], name)
-		fmt.Println("  Claude will re-explore the project with the rewarm prompt.")
 		fmt.Println("  When done, save back with:")
 		fmt.Printf("    claudectl template save %s --name %s --force --trim\n", result.SessionID, name)
 
-		// Resume
+		// Resume with a prompt that asks Claude to re-explore
 		claudeBin, err := exec.LookPath("claude")
 		if err != nil {
 			return fmt.Errorf("claude not found: %w", err)
@@ -294,7 +280,8 @@ or 'claudectl template save <new-session-id> --name <name> --force'.`,
 				os.Chdir(result.Project)
 			}
 		}
-		return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID}, os.Environ())
+		rewarmPrompt := "The codebase has evolved since your last exploration. Please re-read the project structure, check for new/changed files, and update your understanding of the architecture, patterns, and key decisions. Focus on what has changed rather than re-reading everything."
+		return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID, "-p", rewarmPrompt}, os.Environ())
 	},
 }
 
