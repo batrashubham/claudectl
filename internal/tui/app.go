@@ -150,8 +150,9 @@ type Model struct {
 	lastSync   time.Time
 	syncResult string
 	err        error
-	resumeID   string
-	spawnTmpl  string
+	resumeID    string
+	spawnTmpl   string
+	rewarmTmpl  string
 }
 
 func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
@@ -183,6 +184,10 @@ func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
 
 func (m Model) SpawnTemplate() string {
 	return m.spawnTmpl
+}
+
+func (m Model) RewarmTemplate() string {
+	return m.rewarmTmpl
 }
 
 func (m Model) Init() tea.Cmd {
@@ -326,10 +331,9 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.state = dashboardView
 	case msg.String() == "t":
 		if m.focus == focusSidebar {
-			// Rewarm: spawn from template and exit to CLI for re-exploration
+			// Rewarm: spawn from template with rewarm prompt
 			if tmpl := m.selectedTemplate(); tmpl != "" {
-				m.spawnTmpl = tmpl
-				m.syncResult = "rewarm: re-explore then save back with 't' on a session"
+				m.rewarmTmpl = tmpl
 				return m, tea.Quit
 			}
 		} else if m.focus == focusList && len(m.filtered) > 0 {

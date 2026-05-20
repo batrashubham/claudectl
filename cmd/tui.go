@@ -79,6 +79,34 @@ func runTUI() error {
 			}
 			return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID}, os.Environ())
 		}
+
+		// Rewarm template (spawn + rewarm prompt)
+		if tmplName := m.RewarmTemplate(); tmplName != "" {
+			cwd, _ := os.Getwd()
+			projectDir := strings.ReplaceAll(cwd, "/", "-")
+
+			store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+			result, err := store.Spawn(projectDir, tmplName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "rewarm failed: %v\n", err)
+				os.Exit(1)
+			}
+
+			fmt.Printf("Rewarming template '%s' → session %s\n", tmplName, result.SessionID[:12])
+			fmt.Printf("When done, save back: claudectl template save %s --name %s --force --trim\n", result.SessionID, tmplName)
+			claudeBin, err := exec.LookPath("claude")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "claude not found in PATH\n")
+				os.Exit(1)
+			}
+			if result.Project != "" {
+				if _, err := os.Stat(result.Project); err == nil {
+					os.Chdir(result.Project)
+				}
+			}
+			rewarmPrompt := "The codebase has evolved since your last exploration. Please re-read the project structure, check for new/changed files, and update your understanding of the architecture, patterns, and key decisions. Focus on what has changed rather than re-reading everything."
+			return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID, "-p", rewarmPrompt}, os.Environ())
+		}
 	}
 
 	return nil
