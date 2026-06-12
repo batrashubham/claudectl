@@ -22,13 +22,22 @@ func DefaultConfig() *Config {
 	backupDir := filepath.Join(home, ".claudectl", "backup")
 	return &Config{
 		BackupDir:     backupDir,
-		ClaudeDir:     filepath.Join(home, ".claude"),
+		ClaudeDir:     defaultClaudeDir(),
 		SyncOnStart:   true,
 		GitAutoCommit: true,
 		GitRemote:     "",
 		GitPush:       false,
 		TemplatesDir:  filepath.Join(backupDir, "templates"),
 	}
+}
+
+// defaultClaudeDir respects CLAUDE_CONFIG_DIR if set, else ~/.claude
+func defaultClaudeDir() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
 }
 
 func ConfigPath() string {

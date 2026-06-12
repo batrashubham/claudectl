@@ -9,7 +9,24 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+func TestDefaultClaudeDir_RespectsEnvVar(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/claude/path")
+	if got := defaultClaudeDir(); got != "/custom/claude/path" {
+		t.Errorf("defaultClaudeDir() = %q, want /custom/claude/path", got)
+	}
+}
+
+func TestDefaultClaudeDir_FallsBackToHome(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".claude")
+	if got := defaultClaudeDir(); got != want {
+		t.Errorf("defaultClaudeDir() = %q, want %q", got, want)
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	cfg := DefaultConfig()
 
 	home, _ := os.UserHomeDir()

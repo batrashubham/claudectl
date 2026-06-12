@@ -230,7 +230,7 @@ git_push = true
 | Field | Default | Description |
 |-------|---------|-------------|
 | `backup_dir` | `~/.claudectl/backup` | Where to store the backup (git repo) |
-| `claude_dir` | `~/.claude` | Claude Code's config directory |
+| `claude_dir` | `~/.claude` | Claude Code's config directory (respects `CLAUDE_CONFIG_DIR` env var if not set in config) |
 | `sync_on_start` | `true` | Auto-sync when TUI launches |
 | `git_auto_commit` | `true` | Commit after each sync |
 | `git_remote` | `""` | Git remote URL for pushing backups |
