@@ -8,7 +8,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var gcSquash bool
+var (
+	gcSquash   bool
+	gcKeepDays int
+)
 
 var gcCmd = &cobra.Command{
 	Use:   "gc",
@@ -19,9 +22,13 @@ Sessions are append-only and grow over time. Each sync re-commits the
 grown file, so the .git directory accumulates old versions. This command
 runs 'git gc --aggressive' to compress them.
 
-Use --squash to also collapse all git history into a single commit.
-This reclaims the most space but discards the commit history (the
-time-machine view of past syncs). Your current sessions are preserved.`,
+  claudectl gc                 # compress git objects (keeps all history)
+  claudectl gc --keep-days 30  # squash history older than 30 days
+  claudectl gc --squash        # collapse ALL history into one commit
+
+--keep-days preserves recent commit history (the time-machine view) while
+squashing older bloat. --squash discards all history. Sessions are always
+preserved regardless.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
 
@@ -32,12 +39,20 @@ time-machine view of past syncs). Your current sessions are preserved.`,
 			humanize.Bytes(uint64(beforeRepo)),
 			pct(beforeGit, beforeRepo))
 
-		if gcSquash {
-			fmt.Println("Squashing history into a single commit...")
+		switch {
+		case gcSquash:
+			fmt.Println("Squashing all history into a single commit...")
 			if err := engine.Squash(); err != nil {
 				return fmt.Errorf("squash: %w", err)
 			}
-		} else {
+		case gcKeepDays > 0:
+			fmt.Printf("Squashing history older than %d days...\n", gcKeepDays)
+			kept, err := engine.SquashOlderThan(gcKeepDays)
+			if err != nil {
+				return fmt.Errorf("squash: %w", err)
+			}
+			fmt.Printf("Kept %d recent commits.\n", kept)
+		default:
 			fmt.Println("Running git gc...")
 			if err := engine.GC(); err != nil {
 				return fmt.Errorf("gc: %w", err)
@@ -67,5 +82,6 @@ func pct(part, whole int64) float64 {
 
 func init() {
 	gcCmd.Flags().BoolVar(&gcSquash, "squash", false, "Collapse all history into one commit (reclaims most space)")
+	gcCmd.Flags().IntVar(&gcKeepDays, "keep-days", 0, "Squash history older than N days, keep recent commits")
 	rootCmd.AddCommand(gcCmd)
 }

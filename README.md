@@ -67,7 +67,8 @@ claudectl import <file> -p <project>  # Import a .jsonl session file
 claudectl dashboard      # Usage analytics (tokens, activity, projects)
 claudectl status         # Quick health check (backup size, sync, cron)
 claudectl gc             # Reclaim disk space in the backup repo
-claudectl gc --squash    # Compact history into one commit (max reclaim)
+claudectl gc --keep-days 30   # Squash history older than 30 days
+claudectl gc --squash    # Compact all history into one commit (max reclaim)
 claudectl template save <id> --name <name>   # Save session as template
 claudectl template spawn <name> --resume     # Start new session from template
 claudectl template list                      # List available templates
@@ -223,11 +224,16 @@ Sessions are append-only and grow over time. Since each sync re-commits the grow
 Run `claudectl gc` periodically to reclaim space:
 
 ```bash
-claudectl gc            # git gc --aggressive (safe, keeps history)
-claudectl gc --squash   # collapse history into one commit (max reclaim)
+claudectl gc                 # git gc --aggressive (safe, keeps all history)
+claudectl gc --keep-days 30  # squash history older than 30 days
+claudectl gc --squash        # collapse ALL history into one commit (max reclaim)
 ```
 
-`gc` compresses git's object store without losing anything. `--squash` reclaims the most space by discarding commit history (the per-sync time-machine view) while keeping your current sessions intact — use it if the backup has grown large and you don't need to diff old syncs.
+- **`gc`** compresses git's object store without losing anything.
+- **`--keep-days N`** keeps the last N days of commit history (the time-machine view) and squashes everything older into a single base commit. Best balance of space vs. history.
+- **`--squash`** discards all commit history, keeping only current sessions. Maximum reclaim.
+
+Your current sessions are always preserved regardless of which option you use. In testing, a 1.3 GB backup compressed to 265 MB with plain `gc`.
 
 ## Configuration
 

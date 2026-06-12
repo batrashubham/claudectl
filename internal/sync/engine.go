@@ -277,6 +277,19 @@ func runGit(dir string, args ...string) error {
 	return cmd.Run()
 }
 
+// runGitIdentity runs git with a guaranteed committer identity and no GPG
+// signing, for history-rewriting operations that must not depend on the
+// user's global git config being present.
+func runGitIdentity(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=claudectl", "GIT_AUTHOR_EMAIL=claudectl@local",
+		"GIT_COMMITTER_NAME=claudectl", "GIT_COMMITTER_EMAIL=claudectl@local",
+	)
+	return cmd.Run()
+}
+
 // RepoSize returns the total size of the backup directory in bytes.
 func (e *Engine) RepoSize() (int64, error) {
 	var total int64
@@ -343,4 +356,76 @@ func (e *Engine) Squash() error {
 		return fmt.Errorf("rename branch: %w", err)
 	}
 	return e.GC()
+}
+
+// SquashOlderThan keeps commit history for the last `days` days and
+// collapses everything older into a single base commit. Returns the
+// number of commits preserved.
+func (e *Engine) SquashOlderThan(days int) (int, error) {
+	gitDir := e.backupDir
+	if _, err := os.Stat(filepath.Join(gitDir, ".git")); os.IsNotExist(err) {
+		return 0, fmt.Errorf("backup is not a git repo")
+	}
+
+	since := fmt.Sprintf("--since=%d days ago", days)
+
+	// Find the oldest commit within the retention window
+	cmd := exec.Command("git", "log", since, "--reverse", "--format=%H")
+	cmd.Dir = gitDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("git log: %w", err)
+	}
+	lines := strings.Fields(strings.TrimSpace(string(out)))
+	if len(lines) == 0 {
+		// No commits within the window — everything is old, full squash
+		return 0, e.Squash()
+	}
+
+	oldestKept := lines[0]
+
+	// Find the parent of the oldest kept commit (the squash boundary)
+	cmd = exec.Command("git", "rev-parse", oldestKept+"^")
+	cmd.Dir = gitDir
+	parentOut, err := cmd.Output()
+	if err != nil {
+		// oldestKept is the root commit — nothing older to squash
+		return len(lines), nil
+	}
+	boundary := strings.TrimSpace(string(parentOut))
+
+	// Build a single base commit holding the boundary's full tree (orphan, no parent),
+	// then rebase the kept commits (boundary..main) onto that base. This collapses
+	// all history up to the boundary into one commit while preserving recent commits.
+	treeCmd := exec.Command("git", "rev-parse", boundary+"^{tree}")
+	treeCmd.Dir = gitDir
+	treeOut, err := treeCmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("resolve boundary tree: %w", err)
+	}
+	tree := strings.TrimSpace(string(treeOut))
+
+	msg := fmt.Sprintf("squash: history before last %d days", days)
+	ctCmd := exec.Command("git",
+		"-c", "commit.gpgsign=false",
+		"-c", "user.name=claudectl",
+		"-c", "user.email=claudectl@local",
+		"commit-tree", tree, "-m", msg)
+	ctCmd.Dir = gitDir
+	baseOut, err := ctCmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("create base commit: %w", err)
+	}
+	base := strings.TrimSpace(string(baseOut))
+
+	// Rebase boundary..main onto the new base commit
+	if err := runGitIdentity(gitDir, "rebase", "--onto", base, boundary, "main"); err != nil {
+		runGit(gitDir, "rebase", "--abort")
+		return 0, fmt.Errorf("rebase onto base failed: %w", err)
+	}
+
+	if err := e.GC(); err != nil {
+		return len(lines), err
+	}
+	return len(lines), nil
 }
