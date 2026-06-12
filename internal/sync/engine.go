@@ -276,3 +276,71 @@ func runGit(dir string, args ...string) error {
 	cmd.Dir = dir
 	return cmd.Run()
 }
+
+// RepoSize returns the total size of the backup directory in bytes.
+func (e *Engine) RepoSize() (int64, error) {
+	var total int64
+	err := filepath.Walk(e.backupDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+// GitDirSize returns the size of just the .git directory in bytes.
+func (e *Engine) GitDirSize() (int64, error) {
+	gitDir := filepath.Join(e.backupDir, ".git")
+	var total int64
+	err := filepath.Walk(gitDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+// GC runs git garbage collection to reclaim space.
+func (e *Engine) GC() error {
+	gitDir := e.backupDir
+	if _, err := os.Stat(filepath.Join(gitDir, ".git")); os.IsNotExist(err) {
+		return fmt.Errorf("backup is not a git repo")
+	}
+	return runGit(gitDir, "gc", "--aggressive", "--prune=now")
+}
+
+// Squash collapses all git history into a single commit, discarding
+// the commit history but keeping the current file state. This reclaims
+// space when accumulated history of large append-only files grows the repo.
+func (e *Engine) Squash() error {
+	gitDir := e.backupDir
+	if _, err := os.Stat(filepath.Join(gitDir, ".git")); os.IsNotExist(err) {
+		return fmt.Errorf("backup is not a git repo")
+	}
+
+	// Create an orphan branch with current state, then replace main
+	if err := runGit(gitDir, "checkout", "--orphan", "squashed-tmp"); err != nil {
+		return fmt.Errorf("create orphan branch: %w", err)
+	}
+	if err := runGit(gitDir, "add", "-A"); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	if err := runGit(gitDir, "commit", "--no-gpg-sign", "-m", "squash: compact backup history"); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	if err := runGit(gitDir, "branch", "-D", "main"); err != nil {
+		return fmt.Errorf("delete old main: %w", err)
+	}
+	if err := runGit(gitDir, "branch", "-m", "main"); err != nil {
+		return fmt.Errorf("rename branch: %w", err)
+	}
+	return e.GC()
+}

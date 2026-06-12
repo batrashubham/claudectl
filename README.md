@@ -4,7 +4,7 @@ A CLI tool for managing Claude Code sessions with long-term persistence. Syncs y
 
 ## Why
 
-Claude Code deletes session transcripts after 30 days. If you want to revisit an old conversation, search through past sessions, or keep a permanent archive — you're out of luck.
+Claude Code deletes session transcripts after 30 days. You can raise this with the `cleanupPeriodDays` setting, but that still leaves you with a single-machine, unsearchable pile of `.jsonl` files that vanish if your disk dies. There's no way to browse past sessions, search across them, restore on another machine, or skip the codebase warm-up on every new session.
 
 `claudectl` fixes this by:
 - **Syncing** all session data to a backup directory (append-only, never deletes)
@@ -66,6 +66,8 @@ claudectl export <id>    # Export session as readable markdown
 claudectl import <file> -p <project>  # Import a .jsonl session file
 claudectl dashboard      # Usage analytics (tokens, activity, projects)
 claudectl status         # Quick health check (backup size, sync, cron)
+claudectl gc             # Reclaim disk space in the backup repo
+claudectl gc --squash    # Compact history into one commit (max reclaim)
 claudectl template save <id> --name <name>   # Save session as template
 claudectl template spawn <name> --resume     # Start new session from template
 claudectl template list                      # List available templates
@@ -213,6 +215,19 @@ claudectl
 ```
 
 This is backup/restore, not real-time sync — you control when to push and when to pull.
+
+## Managing Backup Size
+
+Sessions are append-only and grow over time. Since each sync re-commits the grown file, the backup's git history accumulates old versions of large session files. Over months, the `.git` directory can grow significantly.
+
+Run `claudectl gc` periodically to reclaim space:
+
+```bash
+claudectl gc            # git gc --aggressive (safe, keeps history)
+claudectl gc --squash   # collapse history into one commit (max reclaim)
+```
+
+`gc` compresses git's object store without losing anything. `--squash` reclaims the most space by discarding commit history (the per-sync time-machine view) while keeping your current sessions intact — use it if the backup has grown large and you don't need to diff old syncs.
 
 ## Configuration
 
