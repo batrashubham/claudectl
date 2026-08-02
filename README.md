@@ -72,7 +72,10 @@ claudectl gc --squash    # Compact all history into one commit (max reclaim)
 claudectl template save <id> --name <name>   # Save session as template
 claudectl template spawn <name> --resume     # Start new session from template
 claudectl template list                      # List available templates
-claudectl cron install   # Add to crontab (default: every 5 min)
+claudectl hook install   # Back up when a Claude session ends (recommended)
+claudectl hook status    # Check if the hook is active
+claudectl hook remove    # Remove the hook
+claudectl cron install   # Alternative: poll on a timer (default: every 5 min)
 claudectl cron status    # Check if cron is active
 claudectl cron remove    # Remove from crontab
 claudectl config         # Show current configuration
@@ -222,6 +225,21 @@ claudectl
 ```
 
 This is backup/restore, not real-time sync — you control when to push and when to pull.
+
+## Automatic Backup
+
+Two ways to keep the backup current without thinking about it:
+
+```bash
+claudectl hook install    # event-driven: backs up when a session ends
+claudectl cron install    # timer-driven: backs up every 5 minutes
+```
+
+**The hook is usually the better choice.** It runs the moment a Claude session ends, so a session is backed up as soon as it's finished rather than up to five minutes later, and nothing runs while you're idle.
+
+It's installed into your Claude Code `settings.json` as a `SessionEnd` hook and runs in the background — Claude never waits on it. (`SessionEnd` hooks share a 1.5-second budget and don't block exit, so a synchronous git push would be killed part-way; running detached avoids that.) Existing hooks and settings are preserved; only claudectl's own entry is added or removed.
+
+Takes effect in new Claude sessions. Either mechanism is enough on its own — the sync lockfile means running both is harmless, just redundant.
 
 ## Managing Backup Size
 

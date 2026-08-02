@@ -59,3 +59,18 @@ GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
 - Cobra commands in separate files under cmd/
 - Internal packages not exported
 - Error messages: lowercase, no punctuation, include context
+
+## Session-format notes (verified against Claude Code 2.1.220)
+
+- `--trim` is a *remove-list*: unknown entry types are always kept, so new
+  Claude Code entry types are safe by default. Re-audit the list when Claude
+  Code adds types; see `internal/template/save.go` for what is deliberately kept.
+- Background sessions (`claude --bg`) store transcripts in the normal
+  `~/.claude/projects/` tree, so the filesystem walk already covers them.
+- **Fork lineage is not recoverable.** `--fork-session` rewrites every UUID and
+  writes no parent reference, so a fork is indistinguishable from a fresh
+  session. Content-prefix matching was evaluated as a proxy and rejected: on
+  real data it produced only false positives (shared `<local-command-caveat>`
+  boilerplate and repeated opening prompts).
+- `SessionEnd` hooks share a 1.5s budget and do not block exit — anything slow
+  must set `async: true` or it gets killed mid-operation.
