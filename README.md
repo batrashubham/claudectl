@@ -173,7 +173,13 @@ claudectl template spawn warm-context --resume
 
 Templates are project-scoped and backed up with sync. Use `--trim` to strip non-essential entries and keep the template lean.
 
-**What `--trim` removes:** `last-prompt` (UI state), `custom-title` (cosmetic), `agent-name` (cosmetic), `queue-operation` (operational logs), `file-history-snapshot` (stale file state). **What it keeps:** all `user`, `assistant`, `attachment`, and `permission-mode` entries — the actual conversation and tool results that form Claude's understanding. If in doubt, omit `--trim` to keep everything.
+**What `--trim` removes** — UI state, cosmetics, and operational logs with no conversation value:
+`last-prompt`, `custom-title`, `ai-title`, `agent-name`, `mode`, `queue-operation`, `progress` (hook logs), `frame-link`, `file-history-snapshot`, `file-history-delta`.
+
+**What it keeps** — everything that carries context or affects resume behaviour:
+`user`, `assistant`, `attachment`, `permission-mode` (the conversation itself), plus `system`, `pr-link` (used by `claude --from-pr`), and `agent-setting` (determines which agent restores on resume).
+
+Unknown entry types are always kept, so templates stay safe as Claude Code adds new ones. If in doubt, omit `--trim` to keep everything.
 
 ## Dashboard & Analytics
 

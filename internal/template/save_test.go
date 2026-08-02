@@ -263,6 +263,69 @@ func TestSave_ForceOverwrite(t *testing.T) {
 	}
 }
 
+// Entry types introduced by newer Claude Code versions. Locks in which are
+// trimmed as noise and which must survive because behaviour depends on them.
+func TestSave_Trim_NewerEntryTypes(t *testing.T) {
+	templatesDir := t.TempDir()
+	claudeDir := t.TempDir()
+
+	sessionDir := filepath.Join(claudeDir, "projects", testProjectDir)
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	trimmed := []string{"progress", "mode", "ai-title", "frame-link", "file-history-delta"}
+	kept := []string{"system", "pr-link", "agent-setting"}
+
+	var lines []string
+	lines = append(lines, `{"type":"permission-mode","sessionId":"`+testSessionID+`"}`)
+	lines = append(lines, `{"type":"user","sessionId":"`+testSessionID+`","message":{"content":"hi"}}`)
+	for _, ty := range append(append([]string{}, trimmed...), kept...) {
+		lines = append(lines, `{"type":"`+ty+`","sessionId":"`+testSessionID+`"}`)
+	}
+	sessionFile := filepath.Join(sessionDir, testSessionID+".jsonl")
+	if err := os.WriteFile(sessionFile, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	store := NewStore(templatesDir, claudeDir)
+	if err := store.Save(SaveOptions{
+		SessionID:  testSessionID,
+		ProjectDir: testProjectDir,
+		Project:    "my-project",
+		Name:       "newer-types",
+		Trim:       true,
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(templatesDir, testProjectDir, "newer-types", "session.jsonl"))
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	got := map[string]bool{}
+	for _, l := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		got[extractType(l)] = true
+	}
+
+	for _, ty := range trimmed {
+		if got[ty] {
+			t.Errorf("%q should have been trimmed but is still present", ty)
+		}
+	}
+	for _, ty := range kept {
+		if !got[ty] {
+			t.Errorf("%q must be preserved but was trimmed", ty)
+		}
+	}
+	// Conversation content always survives.
+	for _, ty := range []string{"permission-mode", "user"} {
+		if !got[ty] {
+			t.Errorf("essential type %q was trimmed", ty)
+		}
+	}
+}
+
 func TestSave_WithRewarmPrompt(t *testing.T) {
 	templatesDir, claudeDir := setupTestDirs(t)
 	store := NewStore(templatesDir, claudeDir)

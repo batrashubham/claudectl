@@ -10,12 +10,25 @@ import (
 	"time"
 )
 
+// trimTypes are entry types removed by --trim: UI state, cosmetics, and
+// operational logs that carry no conversation context. Unknown types are
+// always kept, so new Claude Code entry types are safe by default.
+//
+// Deliberately NOT trimmed:
+//   - system: mixed subtypes, some carry real state
+//   - pr-link: `claude --from-pr` resolves sessions through it
+//   - agent-setting: determines which agent restores on resume
 var trimTypes = map[string]bool{
-	"last-prompt":          true,
-	"custom-title":         true,
-	"agent-name":           true,
-	"queue-operation":      true,
+	"last-prompt":           true,
+	"custom-title":          true,
+	"agent-name":            true,
+	"queue-operation":       true,
 	"file-history-snapshot": true,
+	"file-history-delta":    true, // pairs with file-history-snapshot
+	"progress":              true, // hook progress logs
+	"mode":                  true, // UI mode (normal/plan)
+	"ai-title":              true, // cosmetic generated title
+	"frame-link":            true, // scratchpad artifact links
 }
 
 type SaveOptions struct {
