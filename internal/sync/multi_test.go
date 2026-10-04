@@ -234,3 +234,48 @@ func TestGit_TwoMachinesShareOneRemote(t *testing.T) {
 		t.Errorf("push with nothing new should be a no-op: pushed=%v err=%v", pushed, err)
 	}
 }
+
+// A legacy layout that came from the remote may be any machine's data; a
+// machine that clones it must not claim it as its own.
+func TestSync_DoesNotMigrateLegacyLayoutFromRemote(t *testing.T) {
+	gitAvailable(t)
+	tmp := t.TempDir()
+	remote := filepath.Join(tmp, "remote.git")
+	exec.Command("git", "init", "--bare", remote).Run()
+	exec.Command("git", "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main").Run()
+
+	// An old version on machine A pushed the legacy layout.
+	seed := filepath.Join(tmp, "seed")
+	write(t, filepath.Join(seed, "projects", "-Users-a-proj", "s.jsonl"), "from a\n")
+	for _, args := range [][]string{
+		{"init", "-q"}, {"symbolic-ref", "HEAD", "refs/heads/main"}, {"add", "-A"},
+		{"-c", "user.name=a", "-c", "user.email=a@a", "commit", "-qm", "old"},
+		{"push", "-q", remote, "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = seed
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+
+	backup := filepath.Join(tmp, "b-backup")
+	claude, _ := harness.New("claude", filepath.Join(tmp, "b-claude"))
+	e := NewEngine(backup, "b", []harness.Harness{claude})
+	if err := e.GitClone(remote); err != nil {
+		t.Fatal(err)
+	}
+	res, err := e.Sync()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Migrated {
+		t.Error("cloned legacy data must not be migrated")
+	}
+	if _, err := os.Stat(filepath.Join(backup, "projects", "-Users-a-proj", "s.jsonl")); err != nil {
+		t.Error("legacy data should stay in place")
+	}
+	if _, err := os.Stat(filepath.Join(backup, "machines", "b", "claude", "projects")); err == nil {
+		t.Error("machine b must not claim machine a's sessions")
+	}
+}

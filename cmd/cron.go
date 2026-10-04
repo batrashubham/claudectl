@@ -144,10 +144,9 @@ func init() {
 	rootCmd.AddCommand(cronCmd)
 }
 
+// cronWorkspaceArg pins the workspace explicitly, even the default, so a
+// later 'workspace use' can't silently retarget this job.
 func cronWorkspaceArg() string {
-	if cfg.Workspace == config.DefaultWorkspace {
-		return ""
-	}
 	return " --workspace " + cfg.Workspace
 }
 
@@ -164,8 +163,9 @@ func cronMatches(line string) bool {
 	if !strings.Contains(line, "claudectl") || !strings.Contains(line, " sync") {
 		return false
 	}
-	if cfg.Workspace == config.DefaultWorkspace {
-		return !strings.Contains(line, "--workspace")
+	if strings.Contains(line+" ", "--workspace "+cfg.Workspace+" ") {
+		return true
 	}
-	return strings.Contains(line+" ", "--workspace "+cfg.Workspace+" ")
+	// Lines from before workspaces carry no flag and belong to the default.
+	return cfg.Workspace == config.DefaultWorkspace && !strings.Contains(line, "--workspace")
 }

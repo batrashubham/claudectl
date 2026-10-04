@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/batrashubham/claudectl/internal/config"
@@ -51,6 +52,14 @@ func Restore(h harness.Harness, s index.SessionMeta, localMachine, project strin
 		ProjectKey: loc.ProjectKey,
 		Files:      loc.Files,
 	}
+	if !harness.SafeID(s.ID) {
+		return false, fmt.Errorf("refusing to restore session with unsafe id %q", s.ID)
+	}
+	for _, f := range loc.Files {
+		if _, ok := within(loc.Root, f); !ok {
+			return false, fmt.Errorf("session %s: refusing to restore %q: path escapes the backup", s.ID, f)
+		}
+	}
 	if imp, ok := h.(harness.Importer); ok {
 		if err := imp.Import(loc.Root, src, project); err != nil {
 			return false, err
@@ -67,13 +76,30 @@ func Restore(h harness.Harness, s index.SessionMeta, localMachine, project strin
 		}
 	}
 	for _, c := range copies {
-		from := filepath.Join(loc.Root, c.Src)
-		to := filepath.Join(h.Home(), c.Dst)
+		from, ok1 := within(loc.Root, c.Src)
+		to, ok2 := within(h.Home(), c.Dst)
+		if !ok1 || !ok2 {
+			return false, fmt.Errorf("session %s: refusing to restore %q to %q: path escapes its directory", s.ID, c.Src, c.Dst)
+		}
 		if err := copyPath(from, to); err != nil {
 			return false, fmt.Errorf("restore %s: %w", c.Src, err)
 		}
 	}
 	return true, nil
+}
+
+// within joins rel onto root and reports whether the result stays inside
+// root. Backups may come from other machines, so their paths are untrusted.
+func within(root, rel string) (string, bool) {
+	if filepath.IsAbs(rel) {
+		return "", false
+	}
+	full := filepath.Join(root, rel)
+	r, err := filepath.Rel(root, full)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return full, true
 }
 
 // Exec replaces this process with the agent, run from the project dir.

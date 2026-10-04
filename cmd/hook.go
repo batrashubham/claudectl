@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/hook"
 	"github.com/spf13/cobra"
 )
@@ -40,11 +39,7 @@ var hookInstallCmd = &cobra.Command{
 
 		// --wait: sessions often end together; queue behind a running sync
 		// rather than skipping, or the second session misses this backup.
-		syncArgs := []string{"--wait", "--quiet"}
-		if cfg.Workspace != config.DefaultWorkspace {
-			syncArgs = append(syncArgs, "--workspace", cfg.Workspace)
-		}
-		if err := hook.Install(sessionEndEvent, binary, syncArgs...); err != nil {
+		if err := hook.Install(sessionEndEvent, binary, cfg.Workspace, "--wait", "--quiet"); err != nil {
 			return err
 		}
 
@@ -63,7 +58,7 @@ var hookRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove the SessionEnd backup hook",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		removed, err := hook.Remove(sessionEndEvent)
+		removed, err := hook.Remove(sessionEndEvent, cfg.Workspace)
 		if err != nil {
 			return err
 		}
@@ -80,7 +75,7 @@ var hookStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check whether the SessionEnd hook is installed",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		installed, command, err := hook.Installed(sessionEndEvent)
+		installed, command, err := hook.Installed(sessionEndEvent, cfg.Workspace)
 		if err != nil {
 			return err
 		}

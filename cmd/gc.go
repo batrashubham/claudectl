@@ -30,11 +30,20 @@ squashing older bloat. --squash discards all history. Sessions are always
 preserved regardless.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine := env.Engine()
+		unlock, err := engine.Lock()
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		// Squashing gives the backup a new root commit. With a remote, the
+		// next push would have to rebase that onto the remote's history and
+		// every grown file conflicts, so pushes would fail from then on.
 		if (gcSquash || gcKeepDays > 0) && cfg.GitRemote != "" {
-			fmt.Println("Note: squashing rewrites local history only. The remote keeps its full")
-			fmt.Println("history, and the next push re-applies the squash on top of it, so space")
-			fmt.Println("is only reclaimed locally. To shrink the remote too, recreate it from")
-			fmt.Println("this backup (e.g. a new empty repo + 'git push --force').")
+			return fmt.Errorf(`--squash and --keep-days rewrite history, which would stop this backup from
+pushing to %s (and break every other machine sharing it).
+Plain 'claudectl gc' is safe with a remote. To shrink a shared backup, start a
+fresh remote: create an empty repo, point git_remote at it on every machine,
+and run 'claudectl gc --squash' on one machine before its first push`, cfg.GitRemote)
 		}
 
 		beforeRepo, _ := engine.RepoSize()

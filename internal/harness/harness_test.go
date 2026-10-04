@@ -358,3 +358,31 @@ func TestGemini_ResumeStubIsDeduplicated(t *testing.T) {
 		t.Errorf("want one session keeping the file with messages, got %+v", sessions)
 	}
 }
+
+func TestSafeID(t *testing.T) {
+	for id, ok := range map[string]bool{
+		"0742fed7-4e00-4f99-9945-8bc22e7ef3d0": true,
+		"ses_ef78e1ca4ffe0O3DofdnO1xIWD":       true,
+		"":                                     false,
+		"..":                                   false,
+		"../../../.ssh":                        false,
+		"a/b":                                  false,
+		`a\b`:                                  false,
+		"--config=x":                           false,
+		"a\nb":                                 false,
+	} {
+		if SafeID(id) != ok {
+			t.Errorf("SafeID(%q) = %v, want %v", id, !ok, ok)
+		}
+	}
+}
+
+func TestGemini_UnsafeSessionIDIsIgnored(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "tmp", "p", "chats", "session-2026-01-01T00-00-evil.jsonl"),
+		`{"sessionId":"../../../../.ssh","startTime":"2026-01-01T00:00:00Z"}`+"\n"+
+			`{"id":"1","timestamp":"2026-01-01T00:00:01Z","type":"user","content":[{"text":"x"}]}`+"\n")
+	if sessions, _ := mustNew(t, "gemini", root).Scan(root); len(sessions) != 0 {
+		t.Errorf("session with traversing id must be skipped, got %+v", sessions)
+	}
+}

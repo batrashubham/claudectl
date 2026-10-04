@@ -70,10 +70,11 @@ func (s SessionMeta) IsGhost() bool { return s.FileSize == 0 }
 // Key identifies a session across harnesses, which may reuse ID formats.
 func (s SessionMeta) Key() string { return s.Harness + ":" + s.ID }
 
-// Best returns the location to read or restore from: live first, then
-// this machine's backup, then any other machine's.
+// Best returns the location to read or restore from: the live copy if
+// there is one, otherwise the most complete backup (transcripts only grow,
+// so the largest holds the most turns), preferring this machine's on a tie.
 func (s SessionMeta) Best(localMachine string) (Location, bool) {
-	var fallback *Location
+	var best *Location
 	for i := range s.Locations {
 		l := &s.Locations[i]
 		if len(l.Files) == 0 {
@@ -82,12 +83,12 @@ func (s SessionMeta) Best(localMachine string) (Location, bool) {
 		if l.Live {
 			return *l, true
 		}
-		if fallback == nil || (l.Machine == localMachine && fallback.Machine != localMachine) {
-			fallback = l
+		if best == nil || l.Size > best.Size || (l.Size == best.Size && l.Machine == localMachine && best.Machine != localMachine) {
+			best = l
 		}
 	}
-	if fallback == nil {
+	if best == nil {
 		return Location{}, false
 	}
-	return *fallback, true
+	return *best, true
 }

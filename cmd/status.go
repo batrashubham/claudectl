@@ -99,7 +99,7 @@ func runStatus() error {
 		fmt.Printf("Last sync:  never\n")
 	}
 	hook.SetClaudeDir(cfg.ClaudeDir)
-	if installed, _, err := hook.Installed(sessionEndEvent); err == nil && installed {
+	if installed, _, err := hook.Installed(sessionEndEvent, cfg.Workspace); err == nil && installed {
 		fmt.Printf("Hook:       active (Claude Code SessionEnd)\n")
 	} else {
 		fmt.Printf("Hook:       not installed\n")

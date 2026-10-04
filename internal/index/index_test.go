@@ -253,3 +253,29 @@ func TestFind_PrefixAndHarnessQualifier(t *testing.T) {
 		t.Error("missing session should error")
 	}
 }
+
+// A session backed up on two machines must restore from the more complete
+// copy, with that copy's machine and project path (so the path is mapped
+// from the right home dir).
+func TestBuild_BestCopyDrivesMachineAndProject(t *testing.T) {
+	tmp := t.TempDir()
+	alpha := filepath.Join(tmp, "alpha")
+	local := filepath.Join(tmp, "local")
+	for _, c := range []struct{ root, dir, cwd, body string }{
+		{alpha, "-Users-x-proj", "/Users/x/proj", "turn1\nturn2\nturn3\n"},
+		{local, "-home-x-proj", "/home/x/proj", "turn1\n"},
+	} {
+		os.MkdirAll(filepath.Join(c.root, "projects", c.dir), 0755)
+		os.WriteFile(filepath.Join(c.root, "projects", c.dir, "s.jsonl"),
+			[]byte(`{"type":"user","cwd":"`+c.cwd+`","message":{"role":"user","content":"hi"}}`+"\n"+c.body), 0644)
+	}
+	h, _ := harness.New("claude", t.TempDir())
+	sessions, _ := NewBuilder("local",
+		Source{Harness: h, Machine: "local", Root: local},
+		Source{Harness: h, Machine: "alpha", Root: alpha},
+	).Build()
+	s := sessions[0]
+	if s.Machine != "alpha" || s.Project != "/Users/x/proj" || s.ProjectDir != "-Users-x-proj" {
+		t.Errorf("got machine=%q project=%q key=%q, want alpha's larger copy", s.Machine, s.Project, s.ProjectDir)
+	}
+}

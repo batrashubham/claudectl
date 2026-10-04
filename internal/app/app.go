@@ -120,7 +120,7 @@ func (e *Env) Sources() []index.Source {
 		}
 	}
 	if claude, err := e.Harness("claude"); err == nil && hasLegacyLayout(e.Cfg.BackupDir) {
-		out = append(out, index.Source{Harness: claude, Machine: e.Machine, Root: e.Cfg.BackupDir})
+		out = append(out, index.Source{Harness: claude, Machine: machine.Legacy, Root: e.Cfg.BackupDir})
 	}
 	return out
 }
@@ -210,13 +210,19 @@ type SyncOutcome struct {
 // so a flaky network never loses the local backup.
 func (e *Env) Sync(lockWait time.Duration) (*SyncOutcome, error) {
 	engine := e.Engine().WaitForLock(lockWait)
+	unlock, err := engine.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	out := &SyncOutcome{}
 	if e.Cfg.GitRemote != "" {
 		if err := engine.GitSetupRemote(e.Cfg.GitRemote); err != nil {
 			out.Warnings = append(out.Warnings, fmt.Sprintf("could not set up git remote: %v", err))
 		}
 	}
-	result, err := engine.Sync()
+	result, err := engine.SyncLocked()
 	if err != nil {
 		return nil, err
 	}

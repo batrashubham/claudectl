@@ -94,7 +94,23 @@ func entries(settings map[string]any, event string) []any {
 	return list
 }
 
-func isOurs(group any) bool {
+// commandWorkspace reports which workspace a claudectl hook command syncs.
+// Commands without --workspace predate workspaces and belong to the default.
+func commandWorkspace(cmd string) string {
+	fields := strings.Fields(cmd)
+	for i, f := range fields {
+		f = strings.Trim(f, `"`)
+		if f == "--workspace" && i+1 < len(fields) {
+			return strings.Trim(fields[i+1], `"`)
+		}
+		if v, ok := strings.CutPrefix(f, "--workspace="); ok {
+			return v
+		}
+	}
+	return "default"
+}
+
+func isOursFor(group any, workspace string) bool {
 	g, ok := group.(map[string]any)
 	if !ok {
 		return false
@@ -105,29 +121,29 @@ func isOurs(group any) bool {
 		if !ok {
 			continue
 		}
-		if cmd, _ := hm["command"].(string); ownsCommand(cmd) {
+		if cmd, _ := hm["command"].(string); ownsCommand(cmd) && commandWorkspace(cmd) == workspace {
 			return true
 		}
 	}
 	return false
 }
 
-// Installed reports whether a claudectl-owned hook exists for the event,
-// and the command it runs.
-func Installed(event string) (bool, string, error) {
+// Installed reports whether a claudectl-owned hook exists for the event
+// and workspace, and the command it runs.
+func Installed(event, workspace string) (bool, string, error) {
 	settings, err := load(SettingsPath())
 	if err != nil {
 		return false, "", err
 	}
 	for _, group := range entries(settings, event) {
-		if !isOurs(group) {
+		if !isOursFor(group, workspace) {
 			continue
 		}
 		g := group.(map[string]any)
 		inner, _ := g["hooks"].([]any)
 		for _, h := range inner {
 			hm, _ := h.(map[string]any)
-			if cmd, _ := hm["command"].(string); ownsCommand(cmd) {
+			if cmd, _ := hm["command"].(string); ownsCommand(cmd) && commandWorkspace(cmd) == workspace {
 				return true, cmd, nil
 			}
 		}
@@ -137,8 +153,10 @@ func Installed(event string) (bool, string, error) {
 
 // Install adds a SessionEnd hook running `binary sync` in the background.
 // Re-installing replaces the previous claudectl hook rather than stacking.
-// Extra args are appended after "sync" (e.g. --wait, --workspace work).
-func Install(event, binary string, syncArgs ...string) error {
+// Each workspace gets its own hook, pinned with an explicit --workspace so
+// changing default_workspace later can't silently retarget it. Extra args
+// are appended after "sync" (e.g. --wait).
+func Install(event, binary, workspace string, syncArgs ...string) error {
 	path := SettingsPath()
 	settings, err := load(path)
 	if err != nil {
@@ -151,10 +169,10 @@ func Install(event, binary string, syncArgs ...string) error {
 		settings["hooks"] = hooks
 	}
 
-	// Drop any previous claudectl hook for this event.
+	// Drop any previous claudectl hook for this event and workspace.
 	var kept []any
 	for _, group := range entries(settings, event) {
-		if !isOurs(group) {
+		if !isOursFor(group, workspace) {
 			kept = append(kept, group)
 		}
 	}
@@ -164,7 +182,7 @@ func Install(event, binary string, syncArgs ...string) error {
 		"hooks": []any{
 			map[string]any{
 				"type":    "command",
-				"command": syncCommand(binary, syncArgs),
+				"command": syncCommand(binary, append(append([]string{}, syncArgs...), "--workspace", workspace)),
 				// SessionEnd's budget is 1.5s; async detaches the sync so a
 				// slow git push is never killed halfway through.
 				"async":         true,
@@ -189,9 +207,10 @@ func syncCommand(binary string, args []string) string {
 	return strings.Join(append(parts, marker), " ")
 }
 
-// Remove deletes claudectl-owned hooks for the event, leaving any hooks
-// the user configured themselves untouched. Reports whether it removed one.
-func Remove(event string) (bool, error) {
+// Remove deletes the workspace's claudectl hook for the event, leaving any
+// hooks the user configured themselves (and other workspaces') untouched.
+// Reports whether it removed one.
+func Remove(event, workspace string) (bool, error) {
 	path := SettingsPath()
 	settings, err := load(path)
 	if err != nil {
@@ -206,7 +225,7 @@ func Remove(event string) (bool, error) {
 	var kept []any
 	removed := false
 	for _, group := range existing {
-		if isOurs(group) {
+		if isOursFor(group, workspace) {
 			removed = true
 			continue
 		}

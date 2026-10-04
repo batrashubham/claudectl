@@ -57,6 +57,10 @@ func (b *Builder) Build() ([]SessionMeta, error) {
 			continue
 		}
 		for _, s := range sessions {
+			if !harness.SafeID(s.ID) {
+				b.Warnings = append(b.Warnings, fmt.Sprintf("%s (%s): skipped session with unsafe id %q", src.Harness.Name(), src.Root, s.ID))
+				continue
+			}
 			key := s.Harness + ":" + s.ID
 			a, ok := all[key]
 			if !ok {
@@ -174,8 +178,16 @@ func (a *accum) finish(local string) SessionMeta {
 			m.Status = StatusActive
 		}
 	}
+	// Machine, project and key must describe the same copy: restore reads
+	// that copy and maps its project path from its machine's home.
 	if best, ok := m.Best(local); ok {
 		m.Machine = best.Machine
+		if best.Project != "" {
+			m.Project = best.Project
+		}
+		if best.ProjectKey != "" {
+			m.ProjectDir = best.ProjectKey
+		}
 	} else if len(m.Locations) > 0 {
 		m.Machine = m.Locations[0].Machine
 	}

@@ -88,6 +88,12 @@ var machineRenameCmd = &cobra.Command{
 			return fmt.Errorf("machine %q already exists in the backup", newName)
 		}
 
+		unlock, err := env.Engine().Lock()
+		if err != nil {
+			return err
+		}
+		defer unlock()
+
 		if rawCfg.Machine != "" {
 			rawCfg.Machine = newName
 			if err := config.Save(rawCfg); err != nil {

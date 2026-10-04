@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/batrashubham/claudectl/internal/harness"
@@ -57,19 +58,33 @@ func (e *Engine) WaitForLock(d time.Duration) *Engine {
 
 func (e *Engine) BackupDir() string { return e.backupDir }
 
+// Lock takes the backup's sync lock. Hold it across copy, commit and push:
+// push rebases, and a concurrent commit mid-rebase can be lost.
+func (e *Engine) Lock() (func(), error) {
+	if err := os.MkdirAll(e.backupDir, 0755); err != nil {
+		return nil, fmt.Errorf("create backup dir: %w", err)
+	}
+	return e.acquireLock()
+}
+
+// Sync copies agent data into the backup under the sync lock.
 func (e *Engine) Sync() (*Result, error) {
+	unlock, err := e.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	return e.SyncLocked()
+}
+
+// SyncLocked is Sync for callers already holding Lock.
+func (e *Engine) SyncLocked() (*Result, error) {
 	if e.machine == "" {
 		return nil, fmt.Errorf("sync needs a machine name")
 	}
 	if err := os.MkdirAll(e.backupDir, 0755); err != nil {
 		return nil, fmt.Errorf("create backup dir: %w", err)
 	}
-
-	unlock, err := e.acquireLock()
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
 
 	result := &Result{PerHarness: map[string]int{}}
 
@@ -247,7 +262,15 @@ func copyAtomic(src, dst string) (int64, error) {
 // root) under this machine's claude subtree. Nothing is dropped: files the
 // subtree already has are kept if at least as large, and history lines are
 // unioned.
+//
+// Only a backup that was never pushed is provably this machine's. Once the
+// legacy layout is on the remote it may hold any machine's sessions (and on
+// a fresh clone it certainly isn't ours), so it is left in place and read
+// as its own "legacy" source instead of being misattributed.
 func (e *Engine) migrateLegacy() (bool, error) {
+	if e.legacyIsShared() {
+		return false, nil
+	}
 	dstRoot := machine.Root(e.backupDir, e.machine, "claude")
 	migrated := false
 	for _, name := range []string{"history.jsonl", "projects"} {
@@ -268,6 +291,14 @@ func (e *Engine) migrateLegacy() (bool, error) {
 		migrated = true
 	}
 	return migrated, nil
+}
+
+func (e *Engine) legacyIsShared() bool {
+	if !e.isRepo() {
+		return false
+	}
+	out, err := gitOutput(e.backupDir, "ls-tree", "--name-only", "refs/remotes/origin/"+e.branch(), "--", "projects", "history.jsonl")
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 func mergeDir(src, dst string) error {

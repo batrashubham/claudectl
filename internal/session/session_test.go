@@ -60,3 +60,23 @@ func TestRestore_GhostSessionErrors(t *testing.T) {
 		t.Error("ghost session restore should fail")
 	}
 }
+
+func TestRestore_RefusesPathsEscapingRoots(t *testing.T) {
+	tmp := t.TempDir()
+	h, _ := harness.New("claude", filepath.Join(tmp, "live"))
+	secret := filepath.Join(tmp, "secret")
+	os.WriteFile(secret, []byte("key"), 0600)
+	for name, s := range map[string]index.SessionMeta{
+		"traversing file": {ID: "s1", Harness: "claude", FileSize: 1, Status: index.StatusArchived,
+			Locations: []index.Location{{Machine: "evil", Root: filepath.Join(tmp, "backup"), Files: []string{"projects/-p/../../../secret"}}}},
+		"traversing id": {ID: "../../x", Harness: "claude", FileSize: 1, Status: index.StatusArchived,
+			Locations: []index.Location{{Machine: "evil", Root: filepath.Join(tmp, "backup"), Files: []string{"projects/-p/x.jsonl"}}}},
+	} {
+		if _, err := Restore(h, s, "me", ""); err == nil {
+			t.Errorf("%s: restore should be refused", name)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(tmp, "live")); len(entries) != 0 {
+		t.Errorf("nothing should have been written, got %v", entries)
+	}
+}

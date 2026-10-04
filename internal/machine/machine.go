@@ -22,6 +22,11 @@ const Dir = "machines"
 
 const manifestFile = "machine.json"
 
+// Legacy names the pseudo-machine that pre-multi-machine backups are
+// attributed to once they have been shared through a remote, since they
+// may hold any machine's sessions.
+const Legacy = "legacy"
+
 var nonSlug = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // Slug turns a hostname or user-supplied name into a stable directory name.
@@ -41,6 +46,9 @@ func Slug(name string) string {
 func ValidateName(name string) error {
 	if name == "" || Slug(name) != name {
 		return fmt.Errorf("invalid machine name %q: use lowercase letters, digits and '-' (e.g. %q)", name, Slug(name))
+	}
+	if name == Legacy {
+		return fmt.Errorf("%q is reserved for backups made before multi-machine support", Legacy)
 	}
 	return nil
 }

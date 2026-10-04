@@ -38,11 +38,11 @@ func read(t *testing.T, path string) map[string]any {
 func TestInstall_CreatesSettingsWhenMissing(t *testing.T) {
 	path := withSettings(t, "")
 
-	if err := Install("SessionEnd", "/opt/tools/cctl"); err != nil {
+	if err := Install("SessionEnd", "/opt/tools/cctl", "default"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
-	installed, cmd, err := Installed("SessionEnd")
+	installed, cmd, err := Installed("SessionEnd", "default")
 	if err != nil {
 		t.Fatalf("Installed: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestInstall_PreservesExistingSettings(t *testing.T) {
   }
 }`)
 
-	if err := Install("SessionEnd", "/opt/tools/cctl"); err != nil {
+	if err := Install("SessionEnd", "/opt/tools/cctl", "default"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestInstall_IsIdempotent(t *testing.T) {
 	path := withSettings(t, "")
 
 	for i := 0; i < 3; i++ {
-		if err := Install("SessionEnd", "/opt/tools/cctl"); err != nil {
+		if err := Install("SessionEnd", "/opt/tools/cctl", "default"); err != nil {
 			t.Fatalf("Install #%d: %v", i, err)
 		}
 	}
@@ -127,7 +127,7 @@ func TestInstall_IsIdempotent(t *testing.T) {
 // async or a slow git push gets killed mid-operation.
 func TestInstall_HookIsAsync(t *testing.T) {
 	path := withSettings(t, "")
-	if err := Install("SessionEnd", "/opt/tools/cctl"); err != nil {
+	if err := Install("SessionEnd", "/opt/tools/cctl", "default"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
@@ -150,10 +150,10 @@ func TestRemove_LeavesUserHooksIntact(t *testing.T) {
   }
 }`)
 
-	if err := Install("SessionEnd", "/opt/tools/cctl"); err != nil {
+	if err := Install("SessionEnd", "/opt/tools/cctl", "default"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	removed, err := Remove("SessionEnd")
+	removed, err := Remove("SessionEnd", "default")
 	if err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -170,14 +170,14 @@ func TestRemove_LeavesUserHooksIntact(t *testing.T) {
 		t.Error("removed the wrong hook")
 	}
 
-	if installed, _, _ := Installed("SessionEnd"); installed {
+	if installed, _, _ := Installed("SessionEnd", "default"); installed {
 		t.Error("our hook should be gone")
 	}
 }
 
 func TestRemove_NoopWhenNotInstalled(t *testing.T) {
 	withSettings(t, `{"model":"opus"}`)
-	removed, err := Remove("SessionEnd")
+	removed, err := Remove("SessionEnd", "default")
 	if err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -189,10 +189,10 @@ func TestRemove_NoopWhenNotInstalled(t *testing.T) {
 // Cleaning up should not leave an empty "hooks": {} husk behind.
 func TestRemove_CleansUpEmptyContainers(t *testing.T) {
 	path := withSettings(t, "")
-	if err := Install("SessionEnd", "/opt/tools/cctl"); err != nil {
+	if err := Install("SessionEnd", "/opt/tools/cctl", "default"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if _, err := Remove("SessionEnd"); err != nil {
+	if _, err := Remove("SessionEnd", "default"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 	if _, exists := read(t, path)["hooks"]; exists {
@@ -204,12 +204,46 @@ func TestRemove_CleansUpEmptyContainers(t *testing.T) {
 func TestInstall_RefusesToClobberInvalidJSON(t *testing.T) {
 	path := withSettings(t, `{"model": "opus"`) // truncated
 
-	if err := Install("SessionEnd", "/opt/tools/cctl"); err == nil {
+	if err := Install("SessionEnd", "/opt/tools/cctl", "default"); err == nil {
 		t.Fatal("expected an error on malformed settings.json")
 	}
 
 	data, _ := os.ReadFile(path)
 	if string(data) != `{"model": "opus"` {
 		t.Error("malformed settings file was modified; it must be left untouched")
+	}
+}
+
+// Hooks are per workspace: installing one must not replace another's, and
+// each names its workspace so changing default_workspace can't retarget it.
+func TestInstall_OneHookPerWorkspace(t *testing.T) {
+	withSettings(t, "")
+	if err := Install("SessionEnd", "/bin/cctl", "default", "--wait"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install("SessionEnd", "/bin/cctl", "work", "--wait"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ws := range []string{"default", "work"} {
+		ok, cmd, _ := Installed("SessionEnd", ws)
+		if !ok || !strings.Contains(cmd, "--workspace "+ws) {
+			t.Errorf("%s hook = %v %q", ws, ok, cmd)
+		}
+	}
+	if removed, _ := Remove("SessionEnd", "work"); !removed {
+		t.Error("work hook should be removed")
+	}
+	if ok, _, _ := Installed("SessionEnd", "default"); !ok {
+		t.Error("removing work's hook must leave default's")
+	}
+}
+
+func TestInstalled_LegacyHookCountsAsDefault(t *testing.T) {
+	withSettings(t, `{"hooks":{"SessionEnd":[{"hooks":[{"type":"command","command":"\"/bin/cctl\" sync # claudectl-managed"}]}]}}`)
+	if ok, _, _ := Installed("SessionEnd", "default"); !ok {
+		t.Error("pre-workspace hook belongs to the default workspace")
+	}
+	if ok, _, _ := Installed("SessionEnd", "work"); ok {
+		t.Error("pre-workspace hook is not work's")
 	}
 }

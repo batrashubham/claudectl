@@ -255,7 +255,7 @@ func (g *Gemini) Scan(root string) ([]Session, error) {
 			}
 			path := filepath.Join(dir, "chats", name)
 			chat, err := readGeminiChat(path)
-			if err != nil || chat.SessionID == "" {
+			if err != nil || !SafeID(chat.SessionID) {
 				continue
 			}
 			info, err := f.Info()

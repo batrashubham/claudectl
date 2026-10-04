@@ -26,6 +26,11 @@ copied back when you resume one.`,
 		if cfg.GitRemote == "" {
 			return fmt.Errorf("no git_remote configured — set it in %s or run 'claudectl setup'", configLocation())
 		}
+		unlock, err := engine.Lock()
+		if err != nil {
+			return err
+		}
+		defer unlock()
 
 		if _, err := os.Stat(filepath.Join(cfg.BackupDir, ".git")); os.IsNotExist(err) {
 			if entries, _ := os.ReadDir(cfg.BackupDir); len(entries) > 0 {

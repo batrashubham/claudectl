@@ -173,6 +173,23 @@ func New(name, home string) (Harness, error) {
 	return f.build(home), nil
 }
 
+// SafeID reports whether a session ID is safe to use in file paths and as
+// a CLI argument. IDs are read from file contents, and a backup can come
+// from another machine or a shared remote, so they are untrusted: "../.."
+// would escape the agent's directory on restore, and "-x" would be parsed
+// as a flag by the agent.
+func SafeID(id string) bool {
+	if id == "" || len(id) > 200 || id == "." || id == ".." || strings.HasPrefix(id, "-") {
+		return false
+	}
+	for _, r := range id {
+		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 var projectResolvers = map[string]func(key string, known []string) string{}
 
 // ResolveProjectHash recovers a project path for agents that only record a

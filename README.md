@@ -276,7 +276,7 @@ export CLAUDECTL_WORKSPACE=work      # one shell
 claudectl workspace use work         # the default from now on
 ```
 
-Named workspaces inherit **nothing** from the top-level config (which is the `default` workspace): no remote, no agent directories. So a misconfiguration can't push sessions into the wrong remote. `hook install` and `cron install` run inside a workspace install that workspace's sync.
+Named workspaces inherit **nothing** from the top-level config (which is the `default` workspace): no remote, no agent directories. So a misconfiguration can't push sessions into the wrong remote. Each workspace gets its own hook and cron job, pinned to it with an explicit `--workspace`, so switching `workspace use` later never retargets them.
 
 ## Automatic Backup
 
@@ -313,7 +313,7 @@ claudectl gc --squash        # collapse ALL history into one commit (max reclaim
 
 Your current sessions are always preserved regardless of which option you use. In testing, a 1.3 GB backup compressed to 265 MB with plain `gc`.
 
-With a shared remote, `--squash` and `--keep-days` only shrink your local copy: the remote keeps its history. To shrink the remote too, push the squashed backup to a fresh repo.
+With a git remote configured, `--squash` and `--keep-days` are refused: rewriting history would stop the backup from pushing, for every machine sharing it. Plain `gc` is always safe. To shrink a shared backup, create a fresh empty remote, point `git_remote` at it, and squash before the first push.
 
 ## Configuration
 
@@ -375,9 +375,11 @@ For every enabled agent, `claudectl` copies its transcripts and prompt history i
 - **Databases** (opencode): one JSON snapshot per changed session via `opencode export`, so the backup diffs cleanly in git
 - **Never deletes**: if a session is removed from source, the backup keeps it
 
-Copies are atomic (temp file + rename), and a kernel lock (`<backup_dir>.lock`) keeps concurrent syncs from racing and is released even if a sync crashes. After copying, it commits to git and, if enabled, rebases onto the remote and pushes.
+Copies are atomic (temp file + rename), and a kernel lock (`<backup_dir>.lock`), held across copy, commit and push, keeps concurrent syncs from racing and is released even if a sync crashes.
 
-Backups made before multi-machine support (Claude data at the backup root) are moved under this machine's subtree automatically on the first sync; nothing is dropped.
+Backups can come from other machines, so everything read from them is treated as untrusted: session IDs that could escape a directory or be parsed as a CLI flag are ignored, and restores never write outside the agent's own directory. After copying, it commits to git and, if enabled, rebases onto the remote and pushes.
+
+Backups made before multi-machine support (Claude data at the backup root) are moved under this machine's subtree automatically on the first sync, if they were never pushed; nothing is dropped. A legacy backup that is already on a remote may hold any machine's sessions, so it stays where it is and shows up as machine `legacy`.
 
 ### Index
 
