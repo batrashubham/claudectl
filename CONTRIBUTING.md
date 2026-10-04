@@ -11,7 +11,7 @@ go build -o claudectl .
 ./claudectl --help
 ```
 
-Requires Go 1.21+.
+Requires Go 1.25+.
 
 ## Development Workflow
 
@@ -26,10 +26,13 @@ Requires Go 1.21+.
 ```
 cmd/              # CLI commands (one file per command)
 internal/
-  config/         # TOML config loading
-  index/          # Session index from history.jsonl + filesystem
-  session/        # Locate, restore, resume sessions
-  sync/           # Append-only backup engine
+  app/            # Shared wiring: config + machine + agents
+  harness/        # One adapter per coding agent (see CLAUDE.md, "Adding an agent")
+  machine/        # Machine identity and cross-machine path mapping
+  config/         # TOML config, workspaces
+  index/          # Session index across agents, machines and backups
+  session/        # Restore and resume sessions
+  sync/           # Append-only backup engine + git
   template/       # Session templates (save/spawn)
   tui/            # Bubble Tea terminal UI
 ```
@@ -46,6 +49,7 @@ internal/
 Check [GitHub Issues](https://github.com/batrashubham/claudectl/issues) for open tasks. Good first issues are tagged `good-first-issue`.
 
 **Areas that need help:**
+- Adapters for more coding agents (Cursor CLI, Amp, Aider, ...)
 - Test coverage (especially edge cases in sync and template rewriting)
 - Windows support (syscall.Exec doesn't work — need os/exec fallback)
 - TUI polish (rendering edge cases on different terminal sizes)

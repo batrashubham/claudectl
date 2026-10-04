@@ -4,13 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"syscall"
 	"text/tabwriter"
 
-	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/harness"
+	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
@@ -46,21 +44,21 @@ var templateSaveCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
-		sessions, err := builder.Build()
+		target, err := findSession(sessionID)
 		if err != nil {
 			return err
 		}
-
-		var target *index.SessionMeta
-		for i := range sessions {
-			if sessions[i].ID == sessionID {
-				target = &sessions[i]
-				break
-			}
+		if target.Harness != "claude" {
+			return fmt.Errorf("templates currently support Claude Code sessions only (%s is a %s session)", shortID(target.ID), harness.DisplayName(target.Harness))
 		}
-		if target == nil {
-			return fmt.Errorf("session %s not found", sessionID)
+		// Templates are cut from the live transcript; bring archived or
+		// other-machine sessions back first.
+		if _, err := env.Restore(*target); err != nil {
+			return err
+		}
+		target, err = findSession(target.Key())
+		if err != nil {
+			return err
 		}
 
 		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
@@ -78,7 +76,7 @@ var templateSaveCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("✓ Template '%s' saved from session %s\n", saveName, sessionID[:12])
+		fmt.Printf("✓ Template '%s' saved from session %s\n", saveName, shortID(target.ID))
 		if saveTrim {
 			fmt.Println("  (trimmed non-essential entries)")
 		}
@@ -99,34 +97,24 @@ var templateSpawnCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		projectDir := currentProjectDir()
-		if projectDir == "" {
-			return fmt.Errorf("could not determine current project — run from a project directory")
-		}
-
 		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+		projectDir := resolveTemplateProjectDir(store, name)
+		if projectDir == "" {
+			return fmt.Errorf("template '%s' not found", name)
+		}
 		result, err := store.Spawn(projectDir, name)
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("✓ Spawned new session %s from template '%s'\n", result.SessionID[:12], name)
+		fmt.Printf("✓ Spawned new session %s from template '%s'\n", shortID(result.SessionID), name)
 
 		if spawnResume {
 			fmt.Println("  Resuming...")
-			claudeBin, err := exec.LookPath("claude")
-			if err != nil {
-				return fmt.Errorf("claude CLI not found: %w", err)
-			}
-			if result.Project != "" {
-				if _, err := os.Stat(result.Project); err == nil {
-					os.Chdir(result.Project)
-				}
-			}
-			return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID}, os.Environ())
+			return execClaude(result, "--resume", result.SessionID)
 		}
 
-		fmt.Printf("  Resume with: claude --resume %s\n", result.SessionID)
+		fmt.Printf("  Resume with: claudectl resume %s\n", result.SessionID)
 		return nil
 	},
 }
@@ -252,12 +240,8 @@ or 'claudectl template save <new-session-id> --name <name> --force'.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		projectDir := currentProjectDir()
-		if projectDir == "" {
-			return fmt.Errorf("could not determine current project")
-		}
-
 		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+		projectDir := resolveTemplateProjectDir(store, name)
 		meta, err := store.ReadMeta(projectDir, name)
 		if err != nil {
 			return fmt.Errorf("template '%s' not found", name)
@@ -269,25 +253,16 @@ or 'claudectl template save <new-session-id> --name <name> --force'.`,
 			return err
 		}
 
-		fmt.Printf("✓ Spawned rewarm session %s from template '%s'\n", result.SessionID[:12], name)
+		fmt.Printf("✓ Spawned rewarm session %s from template '%s'\n", shortID(result.SessionID), name)
 		fmt.Println("  When done, save back with:")
 		fmt.Printf("    claudectl template save %s --name %s --force --trim\n", result.SessionID, name)
 
 		// Resume with a prompt that asks Claude to re-explore
-		claudeBin, err := exec.LookPath("claude")
-		if err != nil {
-			return fmt.Errorf("claude not found: %w", err)
-		}
-		if result.Project != "" {
-			if _, statErr := os.Stat(result.Project); statErr == nil {
-				os.Chdir(result.Project)
-			}
-		}
 		rewarmPrompt := meta.RewarmPrompt
 		if rewarmPrompt == "" {
 			rewarmPrompt = template.DefaultRewarmPrompt
 		}
-		return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID, "-p", rewarmPrompt}, os.Environ())
+		return execClaude(result, "--resume", result.SessionID, "-p", rewarmPrompt)
 	},
 }
 
@@ -317,5 +292,32 @@ func currentProjectDir() string {
 	if err != nil {
 		return ""
 	}
-	return strings.ReplaceAll(cwd, "/", "-")
+	return harness.EncodeClaudeProject(cwd)
+}
+
+// resolveTemplateProjectDir prefers a template saved for the current
+// project, then any template with that name.
+func resolveTemplateProjectDir(store *template.Store, name string) string {
+	if dir := currentProjectDir(); dir != "" && store.Exists(dir, name) {
+		return dir
+	}
+	return findTemplateProjectDir(store, name)
+}
+
+func findTemplateProjectDir(store *template.Store, name string) string {
+	all, _ := store.ListAll()
+	for _, t := range all {
+		if t.Name == name {
+			return t.ProjectDir
+		}
+	}
+	return ""
+}
+
+func execClaude(result *template.SpawnResult, args ...string) error {
+	claude, err := env.Harness("claude")
+	if err != nil {
+		return err
+	}
+	return session.Exec(env.Bin(claude), args, result.Project)
 }

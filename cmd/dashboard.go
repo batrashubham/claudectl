@@ -1,19 +1,16 @@
 package cmd
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/dustin/go-humanize"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/template"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 
@@ -52,13 +49,12 @@ var (
 )
 
 func runDashboard() error {
-	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
-	sessions, err := builder.Build()
+	sessions, err := env.Index()
 	if err != nil {
 		return fmt.Errorf("building session index: %w", err)
 	}
 
-	entries := loadAllHistoryEntries(cfg.ClaudeDir, cfg.BackupDir)
+	entries := index.AllPromptEntries(sessions)
 
 	fmt.Println()
 	fmt.Println(titleStyle.Render("⚡ CLAUDECTL DASHBOARD"))
@@ -348,39 +344,4 @@ func startOfDay(t time.Time) time.Time {
 
 func endOfDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, t.Location())
-}
-
-func loadAllHistoryEntries(claudeDir, backupDir string) []index.HistoryEntry {
-	seen := make(map[string]bool)
-	var entries []index.HistoryEntry
-
-	for _, path := range []string{
-		filepath.Join(claudeDir, "history.jsonl"),
-		filepath.Join(backupDir, "history.jsonl"),
-	} {
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-		for scanner.Scan() {
-			var entry index.HistoryEntry
-			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-				continue
-			}
-			if entry.SessionID == "" {
-				continue
-			}
-			dedupKey := fmt.Sprintf("%s:%d", entry.SessionID, entry.Timestamp)
-			if seen[dedupKey] {
-				continue
-			}
-			seen[dedupKey] = true
-			entries = append(entries, entry)
-		}
-		f.Close()
-	}
-
-	return entries
 }

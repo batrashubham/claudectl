@@ -2,19 +2,19 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/batrashubham/claudectl/internal/app"
+	"github.com/batrashubham/claudectl/internal/config"
+	"github.com/batrashubham/claudectl/internal/harness"
+	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
-	"github.com/batrashubham/claudectl/internal/config"
-	"github.com/batrashubham/claudectl/internal/index"
-	"github.com/batrashubham/claudectl/internal/sync"
-	"github.com/batrashubham/claudectl/internal/template"
 )
 
 type viewState int
@@ -86,78 +86,67 @@ func (f filterMode) count(sessions []index.SessionMeta) int {
 	}
 }
 
-func (f filterMode) countFiltered(sessions []index.SessionMeta, projectFilter string) int {
+func (f filterMode) countFiltered(sessions []index.SessionMeta, match func(index.SessionMeta) bool) int {
 	c := 0
 	for _, s := range sessions {
-		// Apply project filter
-		if projectFilter != "" {
-			project := filepath.Base(s.Project)
-			if project == "" || project == "." {
-				project = s.ProjectDir
-			}
-			if project != projectFilter {
-				continue
-			}
-		}
-		// Apply status filter
-		switch f {
-		case filterActive:
-			if s.Status != index.StatusActive {
-				continue
-			}
-		case filterArchived:
-			if s.Status != index.StatusArchived || s.FileSize == 0 {
-				continue
-			}
-		case filterGhost:
-			if s.FileSize > 0 {
-				continue
-			}
-		default:
-			if s.FileSize == 0 {
-				continue
-			}
+		if !match(s) || !f.matches(s) {
+			continue
 		}
 		c++
 	}
 	return c
 }
 
+func (f filterMode) matches(s index.SessionMeta) bool {
+	switch f {
+	case filterActive:
+		return s.Status == index.StatusActive
+	case filterArchived:
+		return s.Status == index.StatusArchived && !s.IsGhost()
+	case filterGhost:
+		return s.IsGhost()
+	default:
+		return !s.IsGhost()
+	}
+}
+
 type syncDoneMsg struct {
-	result *sync.Result
-	err    error
+	outcome *app.SyncOutcome
+	err     error
 }
 
 type Model struct {
-	state      viewState
-	focus      paneFocus
-	sessions   []index.SessionMeta
-	filtered   []index.SessionMeta
-	templates  []template.Meta
-	cursor     int
-	offset     int
-	search     textinput.Model
-	filter     filterMode
+	state     viewState
+	focus     paneFocus
+	sessions  []index.SessionMeta
+	filtered  []index.SessionMeta
+	templates []template.Meta
+	cursor    int
+	offset    int
+	search    textinput.Model
+	filter    filterMode
 
 	// Sidebar
 	sidebarItems  []sidebarItem
 	sidebarCursor int
 	sidebarOffset int
 
-	width      int
-	height     int
-	config     *config.Config
-	syncing    bool
-	lastSync   time.Time
-	syncResult string
-	err        error
+	width       int
+	height      int
+	config      *config.Config
+	env         *app.Env
+	syncing     bool
+	lastSync    time.Time
+	syncResult  string
+	err         error
 	resumeID    string
 	spawnTmpl   string
 	rewarmTmpl  string
 	namingForID string // session ID being saved as template
 }
 
-func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
+func NewModel(env *app.Env, sessions []index.SessionMeta) Model {
+	cfg := env.Cfg
 	ti := textinput.New()
 	ti.Placeholder = "type to search..."
 	ti.Prompt = ""
@@ -178,6 +167,7 @@ func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
 		templates:    templates,
 		search:       ti,
 		config:       cfg,
+		env:          env,
 		sidebarItems: sidebarItems,
 	}
 	m.applyFilter()
@@ -211,12 +201,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.syncResult = fmt.Sprintf("error: %v", msg.err)
 		} else {
-			m.syncResult = fmt.Sprintf("%d new, %d updated", msg.result.NewFiles, msg.result.UpdatedFiles)
+			r := msg.outcome.Result
+			m.syncResult = fmt.Sprintf("%d new, %d updated", r.NewFiles, r.UpdatedFiles)
+			if msg.outcome.Pushed {
+				m.syncResult += ", pushed"
+			}
+			if len(msg.outcome.Warnings) > 0 {
+				m.syncResult += " — " + msg.outcome.Warnings[0]
+			}
 			m.lastSync = time.Now()
-			builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir)
-			if sessions, err := builder.Build(); err == nil {
+			if sessions, err := m.env.Index(); err == nil {
 				m.sessions = sessions
+				m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+				if m.sidebarCursor >= len(m.sidebarItems) {
+					m.sidebarCursor = 0
+				}
 				m.applyFilter()
+				if m.cursor >= len(m.filtered) {
+					m.cursor = 0
+					m.offset = 0
+				}
 			}
 		}
 		return m, nil
@@ -312,7 +316,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if s.FileSize == 0 {
 				m.syncResult = "cannot resume: session file no longer exists"
 			} else {
-				m.resumeID = s.ID
+				m.resumeID = s.Key()
 				return m, tea.Quit
 			}
 		}
@@ -345,9 +349,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			s := m.filtered[m.cursor]
 			if s.FileSize == 0 {
 				m.syncResult = "cannot save ghost session as template"
+			} else if s.Harness != "claude" {
+				m.syncResult = "templates currently support Claude Code sessions only"
 			} else {
-				m.namingForID = s.ID
-				project := filepath.Base(s.Project)
+				m.namingForID = s.Key()
+				project := s.ProjectName()
 				defaultName := strings.ToLower(strings.ReplaceAll(project, " ", "-")) + "-warm"
 				m.search.SetValue(defaultName)
 				m.search.Focus()
@@ -360,10 +366,15 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.focus == focusSidebar {
 			if tmpl := m.selectedTemplate(); tmpl != "" {
 				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
-				cwd, _ := os.Getwd()
-				projectDir := strings.ReplaceAll(cwd, "/", "-")
-				store.Delete(projectDir, tmpl)
-				// Rebuild sidebar
+				meta := m.templateMeta(tmpl)
+				if meta == nil {
+					m.syncResult = fmt.Sprintf("template '%s' not found", tmpl)
+					return m, nil
+				}
+				if err := store.Delete(meta.ProjectDir, tmpl); err != nil {
+					m.syncResult = fmt.Sprintf("delete failed: %v", err)
+					return m, nil
+				}
 				m.templates, _ = store.ListAll()
 				m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
 				if m.sidebarCursor >= len(m.sidebarItems) {
@@ -421,27 +432,35 @@ func (m Model) updateNaming(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		// Find the session
-		var target *index.SessionMeta
-		for i := range m.sessions {
-			if m.sessions[i].ID == m.namingForID {
-				target = &m.sessions[i]
-				break
-			}
-		}
+		target, err := index.Find(m.sessions, m.namingForID)
 		m.namingForID = ""
-
-		if target == nil {
-			m.syncResult = "session not found"
+		if err != nil {
+			m.syncResult = err.Error()
 			return m, nil
+		}
+		// Templates are cut from the live transcript; bring archived
+		// sessions back first.
+		if _, err := m.env.Restore(*target); err != nil {
+			m.syncResult = fmt.Sprintf("save failed: %v", err)
+			return m, nil
+		}
+		// A session from another machine may land under a remapped
+		// project dir; re-read it from where it now lives.
+		if sessions, err := m.env.Index(); err == nil {
+			m.sessions = sessions
+			m.applyFilter()
+			if live, err := index.Find(sessions, target.Key()); err == nil {
+				target = live
+			}
 		}
 
 		store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
-		err := store.Save(template.SaveOptions{
+		err = store.Save(template.SaveOptions{
 			SessionID:   target.ID,
 			ProjectDir:  target.ProjectDir,
 			Project:     target.Project,
 			Name:        name,
-			Description: fmt.Sprintf("Warm context from %s", filepath.Base(target.Project)),
+			Description: fmt.Sprintf("Warm context from %s", target.ProjectName()),
 			Trim:        true,
 			Force:       true,
 		})
@@ -473,7 +492,7 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.syncResult = "cannot resume: session file no longer exists"
 				m.state = listView
 			} else {
-				m.resumeID = s.ID
+				m.resumeID = s.Key()
 				return m, tea.Quit
 			}
 		}
@@ -483,49 +502,18 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) applyFilter() {
 	query := strings.ToLower(m.search.Value())
-	projectFilter := m.sidebarProjectFilter()
 	m.filtered = nil
 
 	for _, s := range m.sessions {
-		// Sidebar project filter
-		if projectFilter != "" {
-			project := filepath.Base(s.Project)
-			if project == "" || project == "." {
-				project = s.ProjectDir
-			}
-			if project != projectFilter {
-				continue
-			}
+		if !m.matchesSidebar(s) || !m.filter.matches(s) {
+			continue
 		}
-
-		// Status filter
-		switch m.filter {
-		case filterAll:
-			if s.FileSize == 0 {
-				continue
-			}
-		case filterActive:
-			if s.Status != index.StatusActive {
-				continue
-			}
-		case filterArchived:
-			if s.Status != index.StatusArchived || s.FileSize == 0 {
-				continue
-			}
-		case filterGhost:
-			if s.FileSize > 0 {
-				continue
-			}
-		}
-
-		// Search
 		if query != "" {
-			searchable := s.SearchText + strings.ToLower(s.Project) + " " + s.ID
+			searchable := s.SearchText + strings.ToLower(s.Project) + " " + s.ID + " " + s.Harness + " " + s.Machine
 			if !strings.Contains(searchable, query) {
 				continue
 			}
 		}
-
 		m.filtered = append(m.filtered, s)
 	}
 }
@@ -573,8 +561,17 @@ func (m Model) viewList() string {
 
 	// ═══ HEADER ═══
 	title := lipgloss.NewStyle().Bold(true).Foreground(purple1).Render(" ⚡ CLAUDECTL")
-	stats := lipgloss.NewStyle().Foreground(midGray).Render(
-		fmt.Sprintf("  %d sessions  ·  %d projects", len(m.sessions), m.projectCount()))
+	statText := fmt.Sprintf("  %d sessions  ·  %d projects", len(m.sessions), m.projectCount())
+	if n := m.distinct(func(s index.SessionMeta) string { return s.Harness }); n > 1 {
+		statText += fmt.Sprintf("  ·  %d agents", n)
+	}
+	if n := m.distinct(func(s index.SessionMeta) string { return s.Machine }); n > 1 {
+		statText += fmt.Sprintf("  ·  %d machines", n)
+	}
+	if m.config.Workspace != config.DefaultWorkspace {
+		statText += "  ·  workspace " + m.config.Workspace
+	}
+	stats := lipgloss.NewStyle().Foreground(midGray).Render(statText)
 	syncBadge := ""
 	if m.syncing {
 		syncBadge = lipgloss.NewStyle().Foreground(purple2).Render("  ◈ syncing...")
@@ -628,22 +625,21 @@ func (m Model) renderSidebar(w, h int) string {
 	b.WriteString(" " + sidebarTitle + "\n\n")
 
 	lines := 2
-	templatesStarted := false
+	section := kindProject
 
 	for i, item := range m.sidebarItems {
 		if lines >= h-1 {
 			break
 		}
 
-		// Templates section header
-		if item.isTmpl && !templatesStarted {
-			templatesStarted = true
+		if item.kind > section {
+			section = item.kind
 			b.WriteString("\n")
-			tmplHeader := lipgloss.NewStyle().Foreground(dimGray).Render(" TEMPLATES")
+			header := lipgloss.NewStyle().Foreground(dimGray).Render(" " + sectionTitle(item.kind))
 			if m.focus == focusSidebar {
-				tmplHeader = lipgloss.NewStyle().Foreground(purple2).Render(" TEMPLATES")
+				header = lipgloss.NewStyle().Foreground(purple2).Render(" " + sectionTitle(item.kind))
 			}
-			b.WriteString(tmplHeader + "\n")
+			b.WriteString(header + "\n")
 			lines += 2
 		}
 
@@ -804,7 +800,7 @@ func (m Model) renderFilters() string {
 	var parts []string
 
 	for _, f := range filters {
-		count := f.countFiltered(m.sessions, m.sidebarProjectFilter())
+		count := f.countFiltered(m.sessions, m.matchesSidebar)
 		label := fmt.Sprintf(" %s %d ", f.label(), count)
 		if f == m.filter {
 			parts = append(parts, lipgloss.NewStyle().
@@ -883,32 +879,35 @@ func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) strin
 	dot := lipgloss.NewStyle().Foreground(dotFg).Render(dotChar)
 
 	// Project name
-	project := filepath.Base(s.Project)
-	if project == "" || project == "." {
-		project = s.ProjectDir
-	}
-	if len(project) > 24 {
-		project = project[:24]
+	project := s.ProjectName()
+	if r := []rune(project); len(r) > 24 {
+		project = string(r[:24])
 	}
 	projRendered := lipgloss.NewStyle().Bold(true).Foreground(projFg).Render(project)
+
+	// Agent and machine badges, only when there's more than one to tell apart
+	badges := ""
+	if m.distinct(func(x index.SessionMeta) string { return x.Harness }) > 1 {
+		badges += "  " + lipgloss.NewStyle().Foreground(harnessColor(s.Harness)).Render(s.Harness)
+	}
+	if m.distinct(func(x index.SessionMeta) string { return x.Machine }) > 1 && s.Machine != "" {
+		badges += "  " + lipgloss.NewStyle().Foreground(metaFg).Render("@"+s.Machine)
+	}
 
 	// Age (right-aligned)
 	age := shortAge(s.LastSeen)
 	ageRendered := lipgloss.NewStyle().Foreground(ageFg).Render(age)
-	usedLine1 := 4 + lipgloss.Width(project) + lipgloss.Width(age)
+	usedLine1 := 4 + lipgloss.Width(project) + lipgloss.Width(badges) + lipgloss.Width(age)
 	gap1 := max(2, contentWidth-usedLine1)
 
-	line1 := cursor + dot + " " + projRendered + strings.Repeat(" ", gap1) + ageRendered
+	line1 := cursor + dot + " " + projRendered + badges + strings.Repeat(" ", gap1) + ageRendered
 
 	// Preview
 	preview := s.FirstPrompt
 	if preview == "" {
-		preview = s.ID[:12] + "..."
+		preview = shortText(s.ID, 12)
 	}
-	maxPrev := contentWidth - 2
-	if len(preview) > maxPrev {
-		preview = preview[:maxPrev-3] + "..."
-	}
+	preview = shortText(preview, contentWidth-2)
 	line2 := "     " + lipgloss.NewStyle().Foreground(prevFg).Render(preview)
 
 	// Meta
@@ -989,12 +988,12 @@ func (m Model) viewDetail() string {
 	// === LEFT: Metadata ===
 	var left strings.Builder
 
-	project := filepath.Base(s.Project)
+	project := s.ProjectName()
 	left.WriteString(lipgloss.NewStyle().Bold(true).Foreground(white).Render(project) + "\n")
 
 	path := s.Project
-	if len(path) > leftWidth-2 {
-		path = "…" + path[len(path)-leftWidth+3:]
+	if r := []rune(path); len(r) > leftWidth-2 {
+		path = "…" + string(r[len(r)-leftWidth+3:])
 	}
 	left.WriteString(lipgloss.NewStyle().Foreground(purple2).Render(path) + "\n")
 	left.WriteString("\n")
@@ -1011,7 +1010,11 @@ func (m Model) viewDetail() string {
 	val := func(v string) string { return lipgloss.NewStyle().Foreground(text).Render(v) }
 
 	left.WriteString(lbl("Status") + statusDot + " " + val(statusText) + "\n")
-	left.WriteString(lbl("Session") + val(s.ID[:16]+"…") + "\n")
+	left.WriteString(lbl("Agent") + lipgloss.NewStyle().Foreground(harnessColor(s.Harness)).Render(harness.DisplayName(s.Harness)) + "\n")
+	if s.Machine != "" {
+		left.WriteString(lbl("Machine") + val(s.Machine) + "\n")
+	}
+	left.WriteString(lbl("Session") + val(shortText(s.ID, 18)) + "\n")
 	left.WriteString(lbl("Started") + val(s.FirstSeen.Format("Jan 2 15:04")) + "\n")
 	left.WriteString(lbl("Last") + val(s.LastSeen.Format("Jan 2 15:04")+" ("+shortAge(s.LastSeen)+" ago)") + "\n")
 	if s.FileSize > 0 {
@@ -1023,7 +1026,7 @@ func (m Model) viewDetail() string {
 	var right strings.Builder
 	right.WriteString(lipgloss.NewStyle().Bold(true).Foreground(purple2).Render("━━ CONVERSATION ━━") + "\n\n")
 
-	prompts := m.getSessionPrompts(s.ID)
+	prompts := index.PromptEntries(s)
 	maxPrompts := m.height - 8
 	if maxPrompts < 5 {
 		maxPrompts = 5
@@ -1036,14 +1039,11 @@ func (m Model) viewDetail() string {
 		ts := time.UnixMilli(p.Timestamp).Format("15:04")
 		timeStr := lipgloss.NewStyle().Foreground(purple4).Render(ts)
 
-		prompt := strings.ReplaceAll(p.Display, "\n", " ")
 		maxLen := rightWidth - 10
 		if maxLen < 20 {
 			maxLen = 20
 		}
-		if len(prompt) > maxLen {
-			prompt = prompt[:maxLen-3] + "..."
-		}
+		prompt := shortText(strings.Join(strings.Fields(p.Display), " "), maxLen)
 		promptStr := lipgloss.NewStyle().Foreground(ltGray).Render(prompt)
 
 		// Left border indicator
@@ -1093,44 +1093,55 @@ func (m Model) viewDetail() string {
 	return b.String()
 }
 
-func (m Model) getSessionPrompts(sessionID string) []index.HistoryEntry {
-	builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir)
-	entries, _ := builder.GetSessionEntries(sessionID)
-	return entries
+func (m Model) projectCount() int {
+	return m.distinct(func(s index.SessionMeta) string { return s.Project })
 }
 
-func (m Model) projectCount() int {
-	projects := make(map[string]bool)
+func (m Model) distinct(key func(index.SessionMeta) string) int {
+	seen := map[string]bool{}
 	for _, s := range m.sessions {
-		projects[s.Project] = true
+		if k := key(s); k != "" {
+			seen[k] = true
+		}
 	}
-	return len(projects)
+	return len(seen)
 }
 
 func (m Model) doSync() tea.Cmd {
+	env := m.env
 	return func() tea.Msg {
-		engine := sync.NewEngine(m.config.ClaudeDir, m.config.BackupDir)
-
-		if m.config.GitRemote != "" {
-			engine.GitSetupRemote(m.config.GitRemote)
-		}
-
-		result, err := engine.Sync()
-		if err != nil {
-			return syncDoneMsg{err: err}
-		}
-		if m.config.GitAutoCommit {
-			engine.GitCommit(result)
-		}
-		if m.config.GitPush {
-			engine.GitPush()
-		}
-		return syncDoneMsg{result: result}
+		out, err := env.Sync(0)
+		return syncDoneMsg{outcome: out, err: err}
 	}
 }
 
 func (m Model) ResumeID() string {
 	return m.resumeID
+}
+
+func shortText(s string, n int) string {
+	r := []rune(s)
+	if n < 4 {
+		n = 4
+	}
+	if len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
+func harnessColor(name string) lipgloss.Color {
+	switch name {
+	case "claude":
+		return lipgloss.Color("#f59e0b")
+	case "codex":
+		return lipgloss.Color("#34d399")
+	case "gemini":
+		return lipgloss.Color("#60a5fa")
+	case "opencode":
+		return lipgloss.Color("#f472b6")
+	}
+	return purple2
 }
 
 func shortAge(t time.Time) string {

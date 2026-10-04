@@ -1,20 +1,17 @@
 package tui
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/template"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
-	"github.com/batrashubham/claudectl/internal/index"
-	"github.com/batrashubham/claudectl/internal/template"
 )
 
 func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -258,37 +255,7 @@ func (m Model) dashStat(label, value string) string {
 }
 
 func (m Model) loadHistoryEntries() []index.HistoryEntry {
-	seen := make(map[string]bool)
-	var entries []index.HistoryEntry
-
-	for _, path := range []string{
-		filepath.Join(m.config.ClaudeDir, "history.jsonl"),
-		filepath.Join(m.config.BackupDir, "history.jsonl"),
-	} {
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-		for scanner.Scan() {
-			var entry index.HistoryEntry
-			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-				continue
-			}
-			if entry.SessionID == "" {
-				continue
-			}
-			key := fmt.Sprintf("%s:%d", entry.SessionID, entry.Timestamp)
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			entries = append(entries, entry)
-		}
-		f.Close()
-	}
-	return entries
+	return index.AllPromptEntries(m.sessions)
 }
 
 func humanizeTokens(tokens int) string {

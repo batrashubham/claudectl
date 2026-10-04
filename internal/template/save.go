@@ -123,7 +123,7 @@ func (s *Store) copySession(src, dst string, trim bool) (entryCount int, sizeByt
 
 	bw := bufio.NewWriter(out)
 	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), maxLineBytes)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -199,4 +199,3 @@ func copyFile(src, dst string) error {
 	_, err = io.Copy(out, in)
 	return err
 }
-

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/hook"
 	"github.com/spf13/cobra"
 )
@@ -13,6 +14,13 @@ const sessionEndEvent = "SessionEnd"
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "Back up automatically when a Claude Code session ends",
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := rootCmd.PersistentPreRunE(cmd, args); err != nil {
+			return err
+		}
+		hook.SetClaudeDir(cfg.ClaudeDir)
+		return nil
+	},
 	Long: `Install a Claude Code SessionEnd hook that syncs your sessions.
 
 This is an event-driven alternative to cron: instead of polling every few
@@ -30,12 +38,19 @@ var hookInstallCmd = &cobra.Command{
 			return fmt.Errorf("locate claudectl binary: %w", err)
 		}
 
-		if err := hook.Install(sessionEndEvent, binary); err != nil {
+		// --wait: sessions often end together; queue behind a running sync
+		// rather than skipping, or the second session misses this backup.
+		syncArgs := []string{"--wait", "--quiet"}
+		if cfg.Workspace != config.DefaultWorkspace {
+			syncArgs = append(syncArgs, "--workspace", cfg.Workspace)
+		}
+		if err := hook.Install(sessionEndEvent, binary, syncArgs...); err != nil {
 			return err
 		}
 
 		fmt.Printf("✓ Installed SessionEnd hook in %s\n", hook.SettingsPath())
 		fmt.Println("  Sessions now back up automatically when a Claude session ends.")
+		fmt.Println("  Each backup covers every enabled agent, not just Claude Code.")
 		fmt.Println("  Runs in the background, so it never delays Claude exiting.")
 		fmt.Println()
 		fmt.Println("  Already using cron? You can drop it: claudectl cron remove")

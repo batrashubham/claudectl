@@ -4,48 +4,49 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"strings"
 	"time"
 
+	"github.com/batrashubham/claudectl/internal/harness"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/spf13/cobra"
 )
 
-var exportOutput string
+var (
+	exportOutput      string
+	exportPromptsOnly bool
+)
 
 var exportCmd = &cobra.Command{
 	Use:   "export <session-id>",
 	Short: "Export a session as a readable markdown document",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		sessionID := args[0]
+	Long: `Export a session's conversation (your prompts and the agent's replies, with
+tool calls noted) as markdown. Works for every supported agent and for
+sessions that only exist in the backup.
 
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
-		sessions, err := builder.Build()
+Use --prompts-only for just the prompts you typed.`,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSessionIDs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		target, err := findSession(args[0])
 		if err != nil {
 			return err
 		}
 
-		var target *index.SessionMeta
-		for i := range sessions {
-			if sessions[i].ID == sessionID {
-				target = &sessions[i]
-				break
+		var msgs []harness.Message
+		if !exportPromptsOnly && !target.IsGhost() {
+			msgs, err = env.Messages(*target)
+			if err != nil {
+				return fmt.Errorf("read transcript: %w", err)
 			}
 		}
-
-		if target == nil {
-			return fmt.Errorf("session %s not found", sessionID)
+		if len(msgs) == 0 {
+			// Ghost sessions, or a transcript with no readable turns: fall
+			// back to the prompt history.
+			for _, e := range index.PromptEntries(*target) {
+				msgs = append(msgs, harness.Message{Role: "user", Text: e.Display, Time: time.UnixMilli(e.Timestamp)})
+			}
 		}
-
-		entries, err := builder.GetSessionEntries(sessionID)
-		if err != nil {
-			return fmt.Errorf("read session entries: %w", err)
-		}
-
-		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].Timestamp < entries[j].Timestamp
-		})
 
 		var w io.Writer = os.Stdout
 		if exportOutput != "" {
@@ -57,41 +58,59 @@ var exportCmd = &cobra.Command{
 			w = f
 		}
 
-		return writeMarkdown(w, target, entries)
+		return writeMarkdown(w, target, msgs)
 	},
 }
 
 func init() {
 	exportCmd.Flags().StringVarP(&exportOutput, "output", "o", "", "Write to file instead of stdout")
+	exportCmd.Flags().BoolVar(&exportPromptsOnly, "prompts-only", false, "Only include the prompts you typed")
 	rootCmd.AddCommand(exportCmd)
 }
 
-func writeMarkdown(w io.Writer, meta *index.SessionMeta, entries []index.HistoryEntry) error {
-	// Header
+func writeMarkdown(w io.Writer, meta *index.SessionMeta, msgs []harness.Message) error {
 	fmt.Fprintf(w, "# Session Export\n\n")
 	fmt.Fprintf(w, "| Field | Value |\n")
 	fmt.Fprintf(w, "|-------|-------|\n")
+	fmt.Fprintf(w, "| Agent | %s |\n", harness.DisplayName(meta.Harness))
 	fmt.Fprintf(w, "| Project | %s |\n", meta.Project)
-	fmt.Fprintf(w, "| Session ID | `%s` |\n", meta.ID)
-
-	if len(entries) > 0 {
-		first := time.UnixMilli(entries[0].Timestamp)
-		last := time.UnixMilli(entries[len(entries)-1].Timestamp)
-		fmt.Fprintf(w, "| Date range | %s - %s |\n", first.Format("2006-01-02 15:04"), last.Format("2006-01-02 15:04"))
-	} else {
-		fmt.Fprintf(w, "| Date range | %s - %s |\n", meta.FirstSeen.Format("2006-01-02 15:04"), meta.LastSeen.Format("2006-01-02 15:04"))
+	if meta.Machine != "" {
+		fmt.Fprintf(w, "| Machine | %s |\n", meta.Machine)
 	}
-
+	fmt.Fprintf(w, "| Session ID | `%s` |\n", meta.ID)
+	if meta.Title != "" {
+		fmt.Fprintf(w, "| Title | %s |\n", meta.Title)
+	}
+	fmt.Fprintf(w, "| Date range | %s - %s |\n", meta.FirstSeen.Format("2006-01-02 15:04"), meta.LastSeen.Format("2006-01-02 15:04"))
 	fmt.Fprintf(w, "| Prompts | %d |\n", meta.PromptCount)
 	fmt.Fprintf(w, "\n---\n\n")
 
-	// Entries
-	for i, entry := range entries {
-		ts := time.UnixMilli(entry.Timestamp)
-		fmt.Fprintf(w, "## Prompt %d\n\n", i+1)
-		fmt.Fprintf(w, "**%s**\n\n", ts.Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(w, "%s\n\n", entry.Display)
+	prompt := 0
+	var tools []string
+	flushTools := func() {
+		if len(tools) > 0 {
+			fmt.Fprintf(w, "> 🔧 %s\n\n", strings.Join(tools, ", "))
+			tools = nil
+		}
 	}
-
+	for _, m := range msgs {
+		switch m.Role {
+		case "tool":
+			tools = append(tools, m.Text)
+			continue
+		case "user":
+			flushTools()
+			prompt++
+			fmt.Fprintf(w, "## Prompt %d\n\n", prompt)
+			if !m.Time.IsZero() {
+				fmt.Fprintf(w, "**%s**\n\n", m.Time.Local().Format("2006-01-02 15:04:05"))
+			}
+		default:
+			flushTools()
+			fmt.Fprintf(w, "### %s\n\n", harness.DisplayName(meta.Harness))
+		}
+		fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(m.Text))
+	}
+	flushTools()
 	return nil
 }

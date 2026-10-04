@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	"github.com/batrashubham/claudectl/internal/config"
 
 	"github.com/spf13/cobra"
 )
@@ -29,7 +32,7 @@ Default interval is 5 minutes. Change with -i flag:
 			return err
 		}
 		fmt.Printf("✓ Installed: syncing every %d minutes\n", cronInterval)
-		fmt.Printf("  Logs: /tmp/claudectl-sync.log\n")
+		fmt.Printf("  Logs: %s\n", cronLogPath())
 		fmt.Printf("  Remove with: claudectl cron remove\n")
 		return nil
 	},
@@ -42,12 +45,14 @@ func installCronJob() error {
 	}
 
 	cronExpr := fmt.Sprintf("*/%d * * * *", cronInterval)
-	cronLine := fmt.Sprintf("%s %s sync >> /tmp/claudectl-sync.log 2>&1", cronExpr, binary)
+	cronLine := fmt.Sprintf("%s %q sync --quiet%s >> %q 2>&1", cronExpr, binary, cronWorkspaceArg(), cronLogPath())
 
 	// Check if already installed
 	existing, _ := exec.Command("crontab", "-l").Output()
-	if strings.Contains(string(existing), "claudectl sync") {
-		return nil
+	for _, line := range strings.Split(string(existing), "\n") {
+		if cronMatches(line) {
+			return nil
+		}
 	}
 
 	// Append to crontab
@@ -80,7 +85,7 @@ var cronRemoveCmd = &cobra.Command{
 		var filtered []string
 		removed := false
 		for _, line := range lines {
-			if strings.Contains(line, "claudectl sync") {
+			if cronMatches(line) {
 				removed = true
 				continue
 			}
@@ -116,7 +121,7 @@ var cronStatusCmd = &cobra.Command{
 
 		found := false
 		for _, line := range strings.Split(string(existing), "\n") {
-			if strings.Contains(line, "claudectl sync") {
+			if cronMatches(line) {
 				fmt.Println("Active:")
 				fmt.Println("  " + line)
 				found = true
@@ -137,4 +142,30 @@ func init() {
 	cronCmd.AddCommand(cronRemoveCmd)
 	cronCmd.AddCommand(cronStatusCmd)
 	rootCmd.AddCommand(cronCmd)
+}
+
+func cronWorkspaceArg() string {
+	if cfg.Workspace == config.DefaultWorkspace {
+		return ""
+	}
+	return " --workspace " + cfg.Workspace
+}
+
+func cronLogPath() string {
+	name := "sync.log"
+	if cfg.Workspace != config.DefaultWorkspace {
+		name = "sync-" + cfg.Workspace + ".log"
+	}
+	return filepath.Join(config.Dir(), name)
+}
+
+// cronMatches finds this workspace's sync line: each workspace gets its own.
+func cronMatches(line string) bool {
+	if !strings.Contains(line, "claudectl") || !strings.Contains(line, " sync") {
+		return false
+	}
+	if cfg.Workspace == config.DefaultWorkspace {
+		return !strings.Contains(line, "--workspace")
+	}
+	return strings.Contains(line+" ", "--workspace "+cfg.Workspace+" ")
 }

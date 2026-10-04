@@ -1,198 +1,222 @@
 package index
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+
+	"github.com/batrashubham/claudectl/internal/harness"
 )
 
-type Builder struct {
-	claudeDir string
-	backupDir string
+// Source is one directory laid out like a harness's data dir: the live one
+// or a machine's copy inside the backup.
+type Source struct {
+	Harness harness.Harness
+	Machine string
+	Root    string
+	Live    bool
 }
 
-func NewBuilder(claudeDir, backupDir string) *Builder {
-	return &Builder{claudeDir: claudeDir, backupDir: backupDir}
+type Builder struct {
+	sources []Source
+	local   string
+	// Warnings collects per-source scan failures; one unreadable source
+	// shouldn't hide every other session.
+	Warnings []string
+}
+
+func NewBuilder(localMachine string, sources ...Source) *Builder {
+	return &Builder{local: localMachine, sources: sources}
+}
+
+type promptKey struct {
+	ms   int64
+	text string
+}
+
+type accum struct {
+	meta     *SessionMeta
+	seen     map[promptKey]bool
+	maxCount int
 }
 
 func (b *Builder) Build() ([]SessionMeta, error) {
-	sessions := make(map[string]*SessionMeta)
+	all := map[string]*accum{}
+	var order []string
+	b.Warnings = nil
 
-	if err := b.parseHistory(sessions); err != nil {
-		return nil, err
+	for _, src := range b.sources {
+		if _, err := os.Stat(src.Root); err != nil {
+			continue
+		}
+		sessions, err := src.Harness.Scan(src.Root)
+		if err != nil {
+			b.Warnings = append(b.Warnings, fmt.Sprintf("%s (%s): %v", src.Harness.Name(), src.Root, err))
+			continue
+		}
+		for _, s := range sessions {
+			key := s.Harness + ":" + s.ID
+			a, ok := all[key]
+			if !ok {
+				a = &accum{meta: &SessionMeta{ID: s.ID, Harness: s.Harness}, seen: map[promptKey]bool{}}
+				all[key] = a
+				order = append(order, key)
+			}
+			a.add(src, s)
+		}
 	}
 
-	b.scanProjectsDir(sessions, b.claudeDir, StatusActive)
-	b.scanProjectsDir(sessions, b.backupDir, StatusArchived)
-
-	result := make([]SessionMeta, 0, len(sessions))
-	for _, s := range sessions {
-		b.resolveStatus(s)
-		result = append(result, *s)
+	result := make([]SessionMeta, 0, len(all))
+	for _, key := range order {
+		result = append(result, all[key].finish(b.local))
 	}
 
-	sort.Slice(result, func(i, j int) bool {
+	resolveUnknownProjects(result)
+
+	sort.SliceStable(result, func(i, j int) bool {
 		return result[i].LastSeen.After(result[j].LastSeen)
 	})
-
 	return result, nil
 }
 
-func (b *Builder) parseHistory(sessions map[string]*SessionMeta) error {
-	// Merge both live and backup history files for resilience.
-	// If Claude cleans the live history.jsonl, the backup still has all prior entries.
-	seen := make(map[string]bool) // dedup key: sessionID+timestamp
-
-	livePath := filepath.Join(b.claudeDir, "history.jsonl")
-	backupPath := filepath.Join(b.backupDir, "history.jsonl")
-
-	b.parseHistoryFile(livePath, sessions, seen)
-	b.parseHistoryFile(backupPath, sessions, seen)
-
-	return nil
-}
-
-func (b *Builder) parseHistoryFile(path string, sessions map[string]*SessionMeta, seen map[string]bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return
+func (a *accum) add(src Source, s harness.Session) {
+	m := a.meta
+	m.Locations = append(m.Locations, Location{
+		Machine:    src.Machine,
+		Root:       src.Root,
+		Live:       src.Live,
+		Files:      s.Files,
+		Project:    s.Project,
+		ProjectKey: s.ProjectKey,
+		Size:       s.SizeBytes,
+	})
+	// The live copy's view of the project wins; otherwise first one found.
+	if s.Project != "" && (m.Project == "" || src.Live) {
+		m.Project = s.Project
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		var entry HistoryEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+	if s.ProjectKey != "" && (m.ProjectDir == "" || src.Live) {
+		m.ProjectDir = s.ProjectKey
+	}
+	if m.Title == "" {
+		m.Title = s.Title
+	}
+	for _, p := range s.Prompts {
+		k := promptKey{p.Time.UnixMilli(), p.Text}
+		if a.seen[k] {
 			continue
 		}
-		if entry.SessionID == "" {
-			continue
-		}
-
-		// Deduplicate across live + backup
-		dedupKey := fmt.Sprintf("%s:%d", entry.SessionID, entry.Timestamp)
-		if seen[dedupKey] {
-			continue
-		}
-		seen[dedupKey] = true
-
-		s, exists := sessions[entry.SessionID]
-		if !exists {
-			s = &SessionMeta{
-				ID:         entry.SessionID,
-				Project:    entry.Project,
-				ProjectDir: projectToDir(entry.Project),
-			}
-			sessions[entry.SessionID] = s
-		}
-
-		ts := time.UnixMilli(entry.Timestamp)
-		if s.FirstSeen.IsZero() || ts.Before(s.FirstSeen) {
-			s.FirstSeen = ts
-		}
-		if ts.After(s.LastSeen) {
-			s.LastSeen = ts
-		}
-
-		if entry.Display != "" && !isCommand(entry.Display) {
-			prompt := truncate(entry.Display, 80)
-			if s.FirstPrompt == "" || ts.Before(s.firstPromptTime) {
-				s.FirstPrompt = prompt
-				s.firstPromptTime = ts
-			}
-			if ts.After(s.lastPromptTime) {
-				s.LastPrompt = prompt
-				s.lastPromptTime = ts
-			}
-			s.SearchText += strings.ToLower(entry.Display) + " "
-		}
-		s.PromptCount++
+		a.seen[k] = true
+		m.Prompts = append(m.Prompts, p)
+	}
+	if s.PromptCount > a.maxCount {
+		a.maxCount = s.PromptCount
+	}
+	if !s.Start.IsZero() && (m.FirstSeen.IsZero() || s.Start.Before(m.FirstSeen)) {
+		m.FirstSeen = s.Start
+	}
+	if s.Updated.After(m.LastSeen) {
+		m.LastSeen = s.Updated
+	}
+	if s.SizeBytes > m.FileSize && len(s.Files) > 0 {
+		m.FileSize = s.SizeBytes
 	}
 }
 
-func (b *Builder) scanProjectsDir(sessions map[string]*SessionMeta, baseDir string, markStatus SessionStatus) {
-	projectsDir := filepath.Join(baseDir, "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		return
+func (a *accum) finish(local string) SessionMeta {
+	m := a.meta
+	hasHistory := false
+	for _, p := range m.Prompts {
+		if !p.Fallback {
+			hasHistory = true
+			break
+		}
+	}
+	if hasHistory {
+		kept := m.Prompts[:0]
+		for _, p := range m.Prompts {
+			if !p.Fallback {
+				kept = append(kept, p)
+			}
+		}
+		m.Prompts = kept
+	}
+	sort.SliceStable(m.Prompts, func(i, j int) bool { return m.Prompts[i].Time.Before(m.Prompts[j].Time) })
+
+	m.PromptCount = len(m.Prompts)
+	if a.maxCount > m.PromptCount {
+		m.PromptCount = a.maxCount
 	}
 
-	for _, projEntry := range entries {
-		if !projEntry.IsDir() {
+	var search strings.Builder
+	if m.Title != "" {
+		search.WriteString(strings.ToLower(m.Title) + " ")
+	}
+	for _, p := range m.Prompts {
+		if p.Text == "" || isCommand(p.Text) {
 			continue
 		}
-		projDir := projEntry.Name()
-		projPath := filepath.Join(projectsDir, projDir)
+		if m.FirstPrompt == "" {
+			m.FirstPrompt = truncate(p.Text, 80)
+		}
+		m.LastPrompt = truncate(p.Text, 80)
+		search.WriteString(strings.ToLower(p.Text) + " ")
+	}
+	if m.FirstPrompt == "" && m.Title != "" {
+		m.FirstPrompt = truncate(m.Title, 80)
+	}
+	m.SearchText = search.String()
 
-		files, err := os.ReadDir(projPath)
-		if err != nil {
+	m.Status = StatusArchived
+	for _, l := range m.Locations {
+		if l.Live && len(l.Files) > 0 {
+			m.Status = StatusActive
+		}
+	}
+	if best, ok := m.Best(local); ok {
+		m.Machine = best.Machine
+	} else if len(m.Locations) > 0 {
+		m.Machine = m.Locations[0].Machine
+	}
+	return *m
+}
+
+// resolveUnknownProjects fills in projects for agents that only record a
+// path hash (Gemini CLI) by hashing every project path seen elsewhere.
+func resolveUnknownProjects(sessions []SessionMeta) {
+	var known []string
+	seen := map[string]bool{}
+	for _, s := range sessions {
+		if s.Project != "" && !seen[s.Project] {
+			seen[s.Project] = true
+			known = append(known, s.Project)
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil && !seen[cwd] {
+		known = append(known, cwd)
+	}
+	for i := range sessions {
+		s := &sessions[i]
+		if s.Project != "" || s.ProjectDir == "" {
 			continue
 		}
-
-		for _, file := range files {
-			if file.IsDir() || !strings.HasSuffix(file.Name(), ".jsonl") {
-				continue
-			}
-			sessionID := strings.TrimSuffix(file.Name(), ".jsonl")
-
-			info, err := file.Info()
-			if err != nil {
-				continue
-			}
-
-			s, exists := sessions[sessionID]
-			if !exists {
-				s = &SessionMeta{
-					ID:         sessionID,
-					ProjectDir: projDir,
-					Project:    dirToProject(projDir),
-				}
-				sessions[sessionID] = s
-			}
-
-			if markStatus == StatusActive {
-				s.activeExists = true
-			} else {
-				s.archivedExists = true
-			}
-
-			if info.Size() > s.FileSize {
-				s.FileSize = info.Size()
-			}
-
-			if s.FirstSeen.IsZero() {
-				s.FirstSeen = info.ModTime()
-				s.LastSeen = info.ModTime()
-			}
+		if p := harness.ResolveProjectHash(s.Harness, s.ProjectDir, known); p != "" {
+			s.Project = p
 		}
 	}
 }
 
-func (b *Builder) resolveStatus(s *SessionMeta) {
-	sourcePath := filepath.Join(b.claudeDir, "projects", s.ProjectDir, s.ID+".jsonl")
-	if _, err := os.Stat(sourcePath); err == nil {
-		s.Status = StatusActive
-	} else {
-		s.Status = StatusArchived
+// ProjectName is the short label shown for a session's project.
+func (s SessionMeta) ProjectName() string {
+	project := filepath.Base(s.Project)
+	if s.Project == "" || project == "." || project == "/" {
+		if s.ProjectDir != "" {
+			return s.ProjectDir
+		}
+		return "(unknown)"
 	}
-}
-
-func projectToDir(project string) string {
-	return strings.ReplaceAll(project, "/", "-")
-}
-
-func dirToProject(dir string) string {
-	if len(dir) > 0 && dir[0] == '-' {
-		return "/" + strings.ReplaceAll(dir[1:], "-", "/")
-	}
-	return dir
+	return project
 }
 
 func isCommand(s string) bool {
@@ -200,38 +224,79 @@ func isCommand(s string) bool {
 }
 
 func truncate(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > maxLen {
-		return s[:maxLen-3] + "..."
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) > maxLen {
+		return string(r[:maxLen-3]) + "..."
 	}
 	return s
 }
 
-func (b *Builder) GetSessionEntries(sessionID string) ([]HistoryEntry, error) {
-	historyPath := filepath.Join(b.claudeDir, "history.jsonl")
-	if _, err := os.Stat(historyPath); os.IsNotExist(err) {
-		historyPath = filepath.Join(b.backupDir, "history.jsonl")
+// Find resolves a session reference: a full ID, a unique ID prefix, or
+// "harness:id" to disambiguate. Ghost sessions are matched too, so the
+// caller can explain why they can't be used.
+func Find(sessions []SessionMeta, ref string) (*SessionMeta, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, fmt.Errorf("empty session id")
 	}
-
-	f, err := os.Open(historyPath)
-	if err != nil {
-		return nil, err
+	harnessName := ""
+	if i := strings.IndexByte(ref, ':'); i > 0 && harness.Known(ref[:i]) {
+		harnessName, ref = ref[:i], ref[i+1:]
 	}
-	defer f.Close()
-
-	var entries []HistoryEntry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		var entry HistoryEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+	var matches []*SessionMeta
+	for i := range sessions {
+		s := &sessions[i]
+		if harnessName != "" && s.Harness != harnessName {
 			continue
 		}
-		if entry.SessionID == sessionID && entry.Display != "" && !isCommand(entry.Display) {
-			entries = append(entries, entry)
+		if s.ID == ref {
+			return s, nil
+		}
+		if strings.HasPrefix(s.ID, ref) {
+			matches = append(matches, s)
 		}
 	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("session %s not found", ref)
+	case 1:
+		return matches[0], nil
+	}
+	var ids []string
+	for i, m := range matches {
+		if i == 5 {
+			ids = append(ids, "...")
+			break
+		}
+		ids = append(ids, m.Harness+":"+m.ID)
+	}
+	return nil, fmt.Errorf("session prefix %q is ambiguous: %s", ref, strings.Join(ids, ", "))
+}
 
-	return entries, scanner.Err()
+func PromptEntries(s SessionMeta) []HistoryEntry {
+	var entries []HistoryEntry
+	for _, p := range s.Prompts {
+		if p.Text == "" || isCommand(p.Text) {
+			continue
+		}
+		entries = append(entries, HistoryEntry{
+			Display:   p.Text,
+			Timestamp: p.Time.UnixMilli(),
+			Project:   s.Project,
+			SessionID: s.ID,
+		})
+	}
+	return entries
+}
+
+// AllPromptEntries flattens every session's prompts, for analytics.
+func AllPromptEntries(sessions []SessionMeta) []HistoryEntry {
+	var out []HistoryEntry
+	for _, s := range sessions {
+		for _, p := range s.Prompts {
+			out = append(out, HistoryEntry{Display: p.Text, Timestamp: p.Time.UnixMilli(), Project: s.Project, SessionID: s.ID})
+		}
+	}
+	return out
 }

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/batrashubham/claudectl/internal/sync"
 	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +29,13 @@ runs 'git gc --aggressive' to compress them.
 squashing older bloat. --squash discards all history. Sessions are always
 preserved regardless.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
+		engine := env.Engine()
+		if (gcSquash || gcKeepDays > 0) && cfg.GitRemote != "" {
+			fmt.Println("Note: squashing rewrites local history only. The remote keeps its full")
+			fmt.Println("history, and the next push re-applies the squash on top of it, so space")
+			fmt.Println("is only reclaimed locally. To shrink the remote too, recreate it from")
+			fmt.Println("this backup (e.g. a new empty repo + 'git push --force').")
+		}
 
 		beforeRepo, _ := engine.RepoSize()
 		beforeGit, _ := engine.GitDirSize()

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/batrashubham/claudectl/internal/config"
+	"github.com/batrashubham/claudectl/internal/machine"
 	"github.com/batrashubham/claudectl/internal/sync"
 	"github.com/spf13/cobra"
 )
@@ -36,11 +37,45 @@ func runSetup() error {
 	fmt.Println()
 	fmt.Println("  ⚡ Welcome to claudectl")
 	fmt.Println("  ─────────────────────────────────────")
-	fmt.Println("  Let's set up session backup for Claude Code.")
+	fmt.Println("  Let's set up session backup for your coding agents.")
 	fmt.Println()
 
+	fmt.Println("  Agents found on this machine:")
+	found := 0
+	for _, h := range env.All {
+		mark := "·"
+		state := "not found"
+		if env.IsEnabled(h.Name()) {
+			mark, state = "✓", "will be backed up"
+			found++
+		}
+		fmt.Printf("    %s %-12s %s (%s)\n", mark, h.DisplayName(), h.Home(), state)
+	}
+	if found == 0 {
+		fmt.Println("    (none yet — they're picked up automatically once installed and used)")
+	}
+	fmt.Println()
+
+	// 0. Machine name
+	fmt.Println("  Name this machine. Sessions are stored per machine, so several")
+	fmt.Println("  machines can share one backup remote without stepping on each other.")
+	fmt.Printf("  Machine name [%s]: ", env.Machine)
+	machineName := readLine(reader)
+	if machineName == "" {
+		machineName = env.Machine
+	}
+	if machineName != env.Machine {
+		if err := machine.ValidateName(machineName); err != nil {
+			return err
+		}
+		if err := machine.SetLocalName(machineName); err != nil {
+			return fmt.Errorf("save machine name: %w", err)
+		}
+	}
+	fmt.Printf("  ✓ Machine: %s\n\n", machineName)
+
 	// 1. Backup directory
-	defaultBackup := filepath.Join(home, ".claudectl", "backup")
+	defaultBackup := cfg.BackupDir
 	fmt.Printf("  Backup directory [%s]: ", defaultBackup)
 	backupDir := readLine(reader)
 	if backupDir == "" {
@@ -62,7 +97,7 @@ func runSetup() error {
 	gitPush := gitRemote != ""
 
 	if gitPush {
-		engine := sync.NewEngine(filepath.Join(home, ".claude"), backupDir)
+		engine := sync.NewEngine(backupDir, machineName, nil)
 		if err := engine.GitSetupRemote(gitRemote); err != nil {
 			fmt.Printf("  ⚠ Could not configure remote: %v\n", err)
 			fmt.Println("  You can set this up later in ~/.claudectl/config.toml")
@@ -101,14 +136,21 @@ func runSetup() error {
 	}
 	fmt.Println()
 
-	// 4. Write config
-	newCfg := &config.Config{
-		BackupDir:     backupDir,
-		ClaudeDir:     filepath.Join(home, ".claude"),
-		SyncOnStart:   true,
-		GitAutoCommit: true,
-		GitRemote:     gitRemote,
-		GitPush:       gitPush,
+	// 4. Write config, keeping anything already configured that the wizard
+	// doesn't ask about (workspaces, harness overrides, path maps).
+	newCfg := rawCfg
+	if cfg.Workspace != config.DefaultWorkspace {
+		ws := newCfg.Workspaces[cfg.Workspace]
+		ws.BackupDir = backupDir
+		ws.GitRemote = gitRemote
+		ws.GitPush = config.Bool(gitPush)
+		newCfg.Workspaces[cfg.Workspace] = ws
+	} else {
+		newCfg.BackupDir = backupDir
+		newCfg.SyncOnStart = true
+		newCfg.GitAutoCommit = true
+		newCfg.GitRemote = gitRemote
+		newCfg.GitPush = gitPush
 	}
 
 	if err := config.Save(newCfg); err != nil {
@@ -122,7 +164,9 @@ func runSetup() error {
 	syncAnswer := strings.ToLower(strings.TrimSpace(readLine(reader)))
 	if syncAnswer == "" || syncAnswer == "y" || syncAnswer == "yes" {
 		fmt.Println()
-		cfg = newCfg
+		if err := reloadEnv(); err != nil {
+			return err
+		}
 		if err := runSyncOnce(); err != nil {
 			fmt.Printf("  ⚠ Sync error: %v\n", err)
 		}

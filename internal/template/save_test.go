@@ -418,3 +418,30 @@ func TestSave_WithoutForce_ErrorsOnExisting(t *testing.T) {
 		t.Errorf("expected error to mention --force, got: %v", err)
 	}
 }
+
+// Transcripts embed images and file contents; a single line can easily
+// exceed a megabyte and must not break template save or spawn.
+func TestSave_HandlesMultiMegabyteLines(t *testing.T) {
+	templatesDir, claudeDir := setupTestDirs(t)
+	big := `{"type":"user","sessionId":"` + testSessionID + `","message":{"content":"` + strings.Repeat("x", 3*1024*1024) + `"}}`
+	sessionFile := filepath.Join(claudeDir, "projects", testProjectDir, testSessionID+".jsonl")
+	if err := os.WriteFile(sessionFile, []byte(sampleJSONL()+big+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore(templatesDir, claudeDir)
+	if err := store.Save(SaveOptions{SessionID: testSessionID, ProjectDir: testProjectDir, Name: "big-one", Trim: true}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	result, err := store.Spawn(testProjectDir, "big-one")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(claudeDir, "projects", testProjectDir, result.SessionID+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), strings.Repeat("x", 3*1024*1024)) {
+		t.Error("large line was lost")
+	}
+}

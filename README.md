@@ -1,22 +1,35 @@
 # claudectl
 
-A CLI tool for managing Claude Code sessions with long-term persistence. Syncs your session data to a git-backed backup, provides a searchable TUI, and lets you resume any session — even ones Claude has cleaned up.
+Back up, search, and resume your coding-agent sessions — **Claude Code, Codex, Gemini CLI, opencode and Qwen Code** — across every machine you work on. Syncs session data to a git-backed backup, provides a searchable TUI, and resumes any session in the agent that created it, even ones the agent has deleted or that started on another machine.
 
 ## Why
 
-Claude Code deletes session transcripts after 30 days. You can raise this with the `cleanupPeriodDays` setting, but that still leaves you with a single-machine, unsearchable pile of `.jsonl` files that vanish if your disk dies. There's no way to browse past sessions, search across them, restore on another machine, or skip the codebase warm-up on every new session.
+Coding agents keep their transcripts on one machine, in their own formats, and clean them up on their own schedule (Claude Code deletes them after 30 days). That leaves you with an unsearchable pile of files per tool, per machine, that vanish if a disk dies — no way to browse past sessions, search across agents, pick up on your desktop what you started on your laptop, or skip the codebase warm-up on every new session.
 
 `claudectl` fixes this by:
-- **Syncing** all session data to a backup directory (append-only, never deletes)
+- **Syncing** every agent's sessions to a backup directory (append-only, never deletes)
 - **Git-versioning** every sync so you have full history
-- **Indexing** sessions with metadata from `history.jsonl` (prompts, timestamps, projects)
-- **Resuming** archived sessions by restoring them back to Claude's projects directory
-- **Starter sessions** — save warm sessions as templates, spawn new ones pre-loaded with context
-- **Backup & restore** — push to a git remote, restore on any machine when needed
+- **Indexing** sessions from all agents into one searchable list (prompts, timestamps, projects)
+- **Resuming** any session — restoring it into the agent's own directory first if needed
+- **Multiple machines** — each machine syncs into its own subtree, so many machines share one remote safely
+- **Workspaces** — separate backup profiles (e.g. work vs personal) that never leak into each other's remote
+- **Starter sessions** — save warm Claude Code sessions as templates, spawn new ones pre-loaded with context
+
+## Supported agents
+
+| Agent | Data it reads | Resume command | Notes |
+|-------|---------------|----------------|-------|
+| Claude Code | `~/.claude` (`CLAUDE_CONFIG_DIR`) | `claude --resume <id>` | Templates, import, SessionEnd hook |
+| Codex | `~/.codex` (`CODEX_HOME`) | `codex resume <id>` | Archived rollouts restore unarchived |
+| Gemini CLI | `~/.gemini` (`GEMINI_CLI_HOME`) | `gemini --resume <id>` | Legacy `.json` chats and hash-keyed dirs read too |
+| opencode | `~/.local/share/opencode` (`XDG_DATA_HOME`, `OPENCODE_DB`) | `opencode --session <id>` | SQLite: backed up via `opencode export`, restored via `opencode import` |
+| Qwen Code | `~/.qwen` (`QWEN_HOME`) | `qwen --resume <id>` | Format verified from source, not yet against a live install |
+
+Each agent is picked up automatically when its data directory exists. Only transcripts and prompt history are backed up — never credentials (`auth.json`, `oauth_creds.json`) or settings.
 
 ## Install
 
-### Go install (requires Go 1.21+)
+### Go install (requires Go 1.25+)
 
 ```bash
 go install github.com/batrashubham/claudectl@latest
@@ -56,16 +69,23 @@ For git remote push, cron scheduling, or custom paths, run `claudectl setup`.
 
 ```bash
 claudectl                # Launch TUI (default)
-claudectl sync           # One-shot sync
+claudectl sync           # One-shot sync of every enabled agent
 claudectl sync --watch   # Continuous sync (every 5m, configurable)
-claudectl list           # Plain text session list
+claudectl list           # Plain text session list, all agents and machines
+claudectl list --agent codex --machine desktop --search "rate limit"
 claudectl list --json    # JSON output for scripting
-claudectl resume <id>    # Resume a session directly by ID
-claudectl restore        # Pull latest backup from git remote
-claudectl export <id>    # Export session as readable markdown
-claudectl import <file> -p <project>  # Import a .jsonl session file
+claudectl resume <id>    # Resume by ID or unique prefix (e.g. 01a1087, codex:01a1)
+claudectl resume <id> --print   # Restore and print the command instead of running it
+claudectl restore        # Pull the backup (incl. other machines' sessions) from the remote
+claudectl export <id>    # Export a session (prompts + replies) as markdown
+claudectl import <file> -p <project>  # Import a Claude Code .jsonl session
 claudectl dashboard      # Usage analytics (tokens, activity, projects)
-claudectl status         # Quick health check (backup size, sync, cron)
+claudectl status         # Health check: agents, machines, backup, hook, cron
+claudectl machine        # List machines sharing the backup
+claudectl machine rename <name>       # Rename this machine
+claudectl workspace list              # List workspaces
+claudectl workspace add work --home claude=~/.claude-work --remote <url> --push
+claudectl --workspace work sync       # Any command, in another workspace
 claudectl gc             # Reclaim disk space in the backup repo
 claudectl gc --keep-days 30   # Squash history older than 30 days
 claudectl gc --squash    # Compact all history into one commit (max reclaim)
@@ -78,13 +98,15 @@ claudectl hook remove    # Remove the hook
 claudectl cron install   # Alternative: poll on a timer (default: every 5 min)
 claudectl cron status    # Check if cron is active
 claudectl cron remove    # Remove from crontab
-claudectl config         # Show current configuration
+claudectl config         # Show the effective configuration
 claudectl setup          # Re-run onboarding wizard
+claudectl completion zsh # Shell completion (bash, zsh, fish) incl. session IDs
+claudectl --version
 ```
 
 ## TUI
 
-Two-pane layout with a project sidebar and session list:
+Two-pane layout with a sidebar (projects, agents, machines, templates) and session list:
 
 ```
 ⚡ CLAUDECTL  25 sessions  ·  8 projects  ✓ synced now
@@ -109,8 +131,8 @@ TEMPLATES            │    ○ api-service                          3w
 
 | Icon | Meaning |
 |------|---------|
-| `●` | Active — exists in `~/.claude/projects/` |
-| `○` | Archived — only in backup (resumable) |
+| `●` | Active — exists in the agent's own data directory on this machine |
+| `○` | Archived — only in the backup, from this or another machine (resumable) |
 | `△` | Ghost — only in history, not resumable (hidden by default) |
 
 ### Key bindings
@@ -120,10 +142,10 @@ TEMPLATES            │    ○ api-service                          3w
 | `j/k` or `↑/↓` | Navigate (in active pane) |
 | `Tab` | Switch focus between sidebar and session list |
 | `Enter` | Detail view (sessions) / Spawn (templates) |
-| `r` | Resume session (restores from backup if needed) |
+| `r` | Resume session in its agent (restores from backup if needed) |
 | `t` | Save current session as a template |
 | `d` | Delete template (when focused in sidebar) |
-| `/` | Full-text search across all prompts |
+| `/` | Full-text search across all prompts, agents and machines |
 | `f` | Cycle filter: All → Active → Archive → Ghost |
 | `s` | Sync now |
 | `g/G` | Jump to top/bottom |
@@ -134,7 +156,11 @@ TEMPLATES            │    ○ api-service                          3w
 
 The left sidebar shows:
 - **Projects** with session counts — select to filter the session list
+- **Agents** — shown when sessions come from more than one agent
+- **Machines** — shown when the backup holds sessions from more than one machine
 - **Templates** — select to view details, Enter to spawn, `d` to delete
+
+When there's more than one agent or machine, each session row also carries an agent badge and an `@machine` tag.
 
 Filter counts update based on the selected project.
 
@@ -161,6 +187,8 @@ A **starter template** captures a session where Claude has already done all of t
 | Startup time | Seconds (but then explores) | Instant (already explored) |
 
 **Best practice**: Use both. CLAUDE.md for rules that should always apply. Templates for warm context that skips the exploration phase.
+
+Templates currently support Claude Code sessions.
 
 ### Usage
 
@@ -200,8 +228,10 @@ All computed locally from your `history.jsonl` — no telemetry, no cloud.
 Share sessions with teammates:
 
 ```bash
-# Export a session as readable markdown
+# Export any agent's session as readable markdown (your prompts, the agent's
+# replies, and the tools it called)
 claudectl export <session-id> -o session.md
+claudectl export <session-id> --prompts-only
 
 # Import a colleague's session file
 claudectl import their-session.jsonl --project /path/to/project --resume
@@ -209,22 +239,44 @@ claudectl import their-session.jsonl --project /path/to/project --resume
 
 Import rewrites session IDs so there are no conflicts with your own sessions.
 
-## Backup & Restore
+## Multiple Machines
 
-Push your backup to a git remote for safekeeping. Restore on another machine when needed:
+Every machine syncs into its own subtree of the backup (`machines/<name>/`), so any number of machines can push to one private git remote without conflicts. Before pushing, `sync` rebases onto whatever the other machines have pushed.
 
 ```bash
-# Back up (happens automatically, or manually)
-claudectl sync
+# On each machine: point at the same private remote
+claudectl setup                      # asks for a machine name and the remote
 
-# Restore from remote on a different machine
-claudectl restore
+# See what the other machines have pushed
+claudectl restore                    # pull (clones on first use)
+claudectl list --machine desktop     # their sessions, alongside yours
+claudectl machine                    # who's in the backup, and when they last synced
 
-# Browse and resume any session
-claudectl
+# Pick up on this machine a session started on another
+claudectl resume 01a1087
 ```
 
-This is backup/restore, not real-time sync — you control when to push and when to pull.
+The machine name defaults to the hostname and is saved in `~/.claudectl/machine` on first use, so a hostname change doesn't start a second subtree. Rename with `claudectl machine rename <name>` or set `machine = "..."` in the config.
+
+**Project paths across machines.** When you resume a session from another machine, its project path is translated to this one. By default the other machine's home directory is swapped for yours (`/Users/me/code/api` → `/home/me/code/api`). For anything else, add `[[path_map]]` rules (see Configuration). The session is restored where the agent will look for that path, then the agent runs from it.
+
+Nothing is ever written into your agents' directories until you resume a session — `restore` only updates the backup.
+
+## Workspaces
+
+A workspace is an independent backup profile with its own backup repo, git remote, and agent data directories. Use one per account or trust boundary. For example, a work Claude Code account kept in `~/.claude-work` should back up to the company remote, never to your personal one:
+
+```bash
+claudectl workspace add work \
+  --home claude=~/.claude-work \
+  --remote git@github.com:acme/agent-backup.git --push
+
+claudectl --workspace work sync      # one command
+export CLAUDECTL_WORKSPACE=work      # one shell
+claudectl workspace use work         # the default from now on
+```
+
+Named workspaces inherit **nothing** from the top-level config (which is the `default` workspace): no remote, no agent directories. So a misconfiguration can't push sessions into the wrong remote. `hook install` and `cron install` run inside a workspace install that workspace's sync.
 
 ## Automatic Backup
 
@@ -235,11 +287,13 @@ claudectl hook install    # event-driven: backs up when a session ends
 claudectl cron install    # timer-driven: backs up every 5 minutes
 ```
 
+Every sync backs up all enabled agents. The hook fires on Claude Code session ends; use cron if you mostly use other agents.
+
 **The hook is usually the better choice.** It runs the moment a Claude session ends, so a session is backed up as soon as it's finished rather than up to five minutes later, and nothing runs while you're idle.
 
 It's installed into your Claude Code `settings.json` as a `SessionEnd` hook and runs in the background — Claude never waits on it. (`SessionEnd` hooks share a 1.5-second budget and don't block exit, so a synchronous git push would be killed part-way; running detached avoids that.) Existing hooks and settings are preserved; only claudectl's own entry is added or removed.
 
-Takes effect in new Claude sessions. Either mechanism is enough on its own — the sync lockfile means running both is harmless, just redundant.
+Takes effect in new Claude sessions. Either mechanism is enough on its own — the sync lock means running both is harmless, just redundant. The hook waits for a sync that's already running instead of skipping, so sessions ending together are all captured.
 
 ## Managing Backup Size
 
@@ -259,27 +313,54 @@ claudectl gc --squash        # collapse ALL history into one commit (max reclaim
 
 Your current sessions are always preserved regardless of which option you use. In testing, a 1.3 GB backup compressed to 265 MB with plain `gc`.
 
+With a shared remote, `--squash` and `--keep-days` only shrink your local copy: the remote keeps its history. To shrink the remote too, push the squashed backup to a fresh repo.
+
 ## Configuration
 
-Config lives at `~/.claudectl/config.toml`:
+Config lives at `~/.claudectl/config.toml` (`claudectl config path`; `CLAUDECTL_HOME` relocates `~/.claudectl`):
 
 ```toml
 backup_dir = "~/.claudectl/backup"
-claude_dir = "~/.claude"
 sync_on_start = true
 git_auto_commit = true
-git_remote = "git@github.com:you/claude-backup.git"
+git_remote = "git@github.com:you/agent-backup.git"
 git_push = true
+# machine = "laptop"            # defaults to the saved hostname-derived name
+
+# Per-agent overrides. Agents are on whenever their data dir exists.
+[harnesses.codex]
+home = "~/.codex"
+[harnesses.gemini]
+enabled = false                 # never back up Gemini CLI
+[harnesses.opencode]
+bin = "/opt/opencode/bin/opencode"
+
+# Map project paths recorded on other machines to this one.
+[[path_map]]
+from = "/Users/me/code"
+to = "/home/me/src"
+
+# Independent backup profiles.
+[workspaces.work]
+git_remote = "git@github.com:acme/agent-backup.git"
+git_push = true
+[workspaces.work.harnesses.claude]
+home = "~/.claude-work"
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `backup_dir` | `~/.claudectl/backup` | Where to store the backup (git repo) |
-| `claude_dir` | `~/.claude` | Claude Code's config directory (respects `CLAUDE_CONFIG_DIR` env var if not set in config) |
+| `claude_dir` | `~/.claude` | Shorthand for `[harnesses.claude] home` (respects `CLAUDE_CONFIG_DIR`) |
 | `sync_on_start` | `true` | Auto-sync when TUI launches |
 | `git_auto_commit` | `true` | Commit after each sync |
 | `git_remote` | `""` | Git remote URL for pushing backups |
 | `git_push` | `false` | Push to remote after each commit |
+| `machine` | hostname | This machine's name in the backup |
+| `default_workspace` | `default` | Workspace used when none is given |
+| `[harnesses.<agent>]` | auto | `enabled`, `home`, `bin` per agent (`claude`, `codex`, `gemini`, `opencode`, `qwen`) |
+| `[[path_map]]` | — | `from`/`to` prefixes for translating other machines' project paths |
+| `[workspaces.<name>]` | — | `backup_dir`, `git_remote`, `git_push`, `git_auto_commit`, `sync_on_start`, `harnesses` |
 
 Templates are stored at `<backup_dir>/templates/` — automatically git-versioned with the rest of your backup.
 
@@ -287,56 +368,61 @@ Templates are stored at `<backup_dir>/templates/` — automatically git-versione
 
 ### Sync
 
-`claudectl` walks `~/.claude/projects/` and copies session files to the backup directory:
+For every enabled agent, `claudectl` copies its transcripts and prompt history into `machines/<this machine>/<agent>/` in the backup, mirroring the agent's own layout:
 - **New files**: copied immediately
-- **Growing files**: overwritten (sessions only grow via append)
+- **Growing files**: overwritten (JSONL transcripts only grow via append)
+- **Rewritten documents** (Gemini's legacy JSON chats): newer version wins
+- **Databases** (opencode): one JSON snapshot per changed session via `opencode export`, so the backup diffs cleanly in git
 - **Never deletes**: if a session is removed from source, the backup keeps it
 
-After copying, it commits to git (and optionally pushes to remote).
+Copies are atomic (temp file + rename), and a kernel lock (`<backup_dir>.lock`) keeps concurrent syncs from racing and is released even if a sync crashes. After copying, it commits to git and, if enabled, rebases onto the remote and pushes.
+
+Backups made before multi-machine support (Claude data at the backup root) are moved under this machine's subtree automatically on the first sync; nothing is dropped.
 
 ### Index
 
-Sessions are indexed by merging two sources:
-1. **`~/.claude/history.jsonl`** — every prompt you've typed, linked to session IDs
-2. **Filesystem walk** — catches sessions not in history
-
-Both the live and backup copies of `history.jsonl` are merged and deduplicated, so even if Claude cleans the live file, your backup preserves all metadata.
+Sessions are indexed from every agent's live directory plus every machine's subtree in the backup, merged by agent and session ID. Prompt history from all copies is unioned, so even if an agent prunes its own history, the backup preserves it.
 
 ### Resume
 
-When you resume an archived session:
-1. The `.jsonl` file is copied from backup back to `~/.claude/projects/`
-2. Any subagent/tool-result subdirectories are also restored
-3. `claude --resume <session-id>` is exec'd
+When you resume a session that isn't live on this machine:
+1. Its project path is translated for this machine (path_map, then home-dir swap)
+2. Its files are restored to where the agent looks for that project (or imported, for opencode)
+3. The agent's resume command is exec'd from the project directory
 
 ## Data Layout
 
 ```
 ~/.claudectl/
 ├── config.toml
-└── backup/                   # git repo (synced + pushed)
-    ├── .gitattributes        # merge=union for history.jsonl
-    ├── history.jsonl
-    ├── templates/            # session templates (project-scoped)
-    │   └── -Users-you-code-project-a/
-    │       └── warm-context/
-    │           ├── meta.json
-    │           └── session.jsonl
-    └── projects/
-        ├── -Users-you-code-project-a/
-        │   ├── abc123.jsonl
-        │   └── abc123/
-        │       └── subagents/
-        └── -Users-you-code-project-b/
-            └── def456.jsonl
+├── machine                       # this machine's name
+├── backup.lock
+└── backup/                       # git repo (synced + pushed)
+    ├── .gitattributes            # merge=union for history.jsonl
+    ├── templates/                # Claude Code session templates (shared)
+    └── machines/
+        ├── laptop/
+        │   ├── machine.json      # os, home dir, agent dirs
+        │   ├── claude/
+        │   │   ├── history.jsonl
+        │   │   └── projects/-Users-you-code-app/<id>.jsonl
+        │   ├── codex/
+        │   │   └── sessions/2026/10/04/rollout-...-<id>.jsonl
+        │   ├── gemini/
+        │   │   └── tmp/app/chats/session-...-<id8>.jsonl
+        │   └── opencode/
+        │       └── sessions/ses_<id>.json
+        └── desktop/
+            └── ...
 ```
 
 ## Security
 
-**Your session transcripts may contain secrets.** Claude Code sessions can include API keys, passwords, tokens, and other sensitive data that appeared in tool results or conversation context.
+**Your session transcripts may contain secrets.** Agent sessions can include API keys, passwords, tokens, and other sensitive data that appeared in tool results or conversation context.
 
 - **Always use a private git remote** for your backup repo
-- **Never push to a public repository** — your entire Claude Code history would be exposed
+- **Never push to a public repository** — your entire agent history would be exposed
+- Use a separate workspace (and remote) for each account or employer
 - claudectl does not encrypt data at rest or in transit (beyond what git/SSH provides)
 - Consider using a dedicated private repo (not your main code repo) for backups
 
@@ -344,8 +430,8 @@ If you accidentally push to a public repo, rotate any credentials that may have 
 
 ## Requirements
 
-- Claude Code CLI installed (`claude` in PATH)
-- Go 1.21+ (for building from source)
+- At least one supported agent installed (its CLI in `PATH` to resume; opencode's to back up)
+- Go 1.25+ (for building from source)
 - Git (for backup versioning)
 - macOS or Linux
 

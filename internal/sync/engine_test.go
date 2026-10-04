@@ -5,7 +5,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/batrashubham/claudectl/internal/harness"
 )
+
+func newClaudeEngine(t *testing.T, claudeDir, backupDir string) *Engine {
+	t.Helper()
+	h, err := harness.New("claude", claudeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewEngine(backupDir, "m1", []harness.Harness{h})
+}
 
 func TestSyncFile_NewFileCopies(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -155,7 +166,7 @@ func TestSync_FullFlow(t *testing.T) {
 	os.WriteFile(filepath.Join(claudeDir, "history.jsonl"), []byte(`{"id":"1"}`+"\n"), 0644)
 	os.WriteFile(filepath.Join(claudeDir, "projects", "proj1", "session.jsonl"), []byte(`{"ts":"now"}`+"\n"), 0644)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := newClaudeEngine(t, claudeDir, backupDir)
 	result, err := e.Sync()
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)
@@ -168,7 +179,7 @@ func TestSync_FullFlow(t *testing.T) {
 	}
 
 	// Verify history.jsonl was copied
-	histContent, err := os.ReadFile(filepath.Join(backupDir, "history.jsonl"))
+	histContent, err := os.ReadFile(filepath.Join(backupDir, "machines", "m1", "claude", "history.jsonl"))
 	if err != nil {
 		t.Fatalf("history.jsonl not copied: %v", err)
 	}
@@ -177,7 +188,7 @@ func TestSync_FullFlow(t *testing.T) {
 	}
 
 	// Verify project file was copied
-	sessContent, err := os.ReadFile(filepath.Join(backupDir, "projects", "proj1", "session.jsonl"))
+	sessContent, err := os.ReadFile(filepath.Join(backupDir, "machines", "m1", "claude", "projects", "proj1", "session.jsonl"))
 	if err != nil {
 		t.Fatalf("session.jsonl not copied: %v", err)
 	}
@@ -200,20 +211,20 @@ func TestSync_SkipsMemoryDirectories(t *testing.T) {
 	os.MkdirAll(filepath.Join(claudeDir, "projects", "proj1"), 0755)
 	os.WriteFile(filepath.Join(claudeDir, "projects", "proj1", "session.jsonl"), []byte("session data"), 0644)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := newClaudeEngine(t, claudeDir, backupDir)
 	_, err := e.Sync()
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)
 	}
 
 	// The memory file should NOT exist in backup
-	memoryDst := filepath.Join(backupDir, "projects", "proj1", "memory", "foo.md")
+	memoryDst := filepath.Join(backupDir, "machines", "m1", "claude", "projects", "proj1", "memory", "foo.md")
 	if _, err := os.Stat(memoryDst); err == nil {
 		t.Error("memory/foo.md should NOT be copied to backup")
 	}
 
 	// The normal file should exist
-	sessDst := filepath.Join(backupDir, "projects", "proj1", "session.jsonl")
+	sessDst := filepath.Join(backupDir, "machines", "m1", "claude", "projects", "proj1", "session.jsonl")
 	if _, err := os.Stat(sessDst); err != nil {
 		t.Error("session.jsonl should be copied to backup")
 	}
@@ -227,17 +238,13 @@ func TestSync_LockfilePreventsConccurentSync(t *testing.T) {
 	os.MkdirAll(filepath.Join(claudeDir, "projects"), 0755)
 	os.MkdirAll(backupDir, 0755)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := newClaudeEngine(t, claudeDir, backupDir)
 
-	// Manually create the lock file at the engine's expected path
-	lockPath := e.lockPath()
-	os.MkdirAll(filepath.Dir(lockPath), 0755)
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	// Hold the lock as a concurrent sync would
+	unlock, err := e.acquireLock()
 	if err != nil {
-		t.Fatalf("failed to create lock file: %v", err)
+		t.Fatalf("failed to take lock: %v", err)
 	}
-	f.Close()
-	defer os.Remove(lockPath)
 
 	// Try to sync — should fail due to lock
 	_, err = e.Sync()
@@ -248,8 +255,7 @@ func TestSync_LockfilePreventsConccurentSync(t *testing.T) {
 		t.Errorf("expected 'sync already in progress' error, got: %v", err)
 	}
 
-	// Release lock manually
-	os.Remove(lockPath)
+	unlock()
 
 	// Now sync should work
 	_, err = e.Sync()
@@ -270,7 +276,7 @@ func TestSync_TemplatesInBackupSurviveSync(t *testing.T) {
 	// Pre-place a template in backup/templates/
 	os.WriteFile(filepath.Join(backupDir, "templates", "meta.json"), []byte(`{"name":"warm"}`), 0644)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := newClaudeEngine(t, claudeDir, backupDir)
 	_, err := e.Sync()
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)

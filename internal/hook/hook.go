@@ -30,7 +30,16 @@ func ownsCommand(cmd string) bool {
 // the sync must run async or it gets killed mid-commit.
 const timeoutSeconds = 120
 
+var claudeDir string
+
+// SetClaudeDir points the hook at a specific Claude Code data dir (e.g. a
+// workspace's), instead of the default from CLAUDE_CONFIG_DIR or ~/.claude.
+func SetClaudeDir(dir string) { claudeDir = dir }
+
 func SettingsPath() string {
+	if claudeDir != "" {
+		return filepath.Join(claudeDir, "settings.json")
+	}
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
 		return filepath.Join(dir, "settings.json")
 	}
@@ -128,7 +137,8 @@ func Installed(event string) (bool, string, error) {
 
 // Install adds a SessionEnd hook running `binary sync` in the background.
 // Re-installing replaces the previous claudectl hook rather than stacking.
-func Install(event, binary string) error {
+// Extra args are appended after "sync" (e.g. --wait, --workspace work).
+func Install(event, binary string, syncArgs ...string) error {
 	path := SettingsPath()
 	settings, err := load(path)
 	if err != nil {
@@ -154,7 +164,7 @@ func Install(event, binary string) error {
 		"hooks": []any{
 			map[string]any{
 				"type":    "command",
-				"command": fmt.Sprintf("%q sync %s", binary, marker),
+				"command": syncCommand(binary, syncArgs),
 				// SessionEnd's budget is 1.5s; async detaches the sync so a
 				// slow git push is never killed halfway through.
 				"async":         true,
@@ -166,6 +176,17 @@ func Install(event, binary string) error {
 	hooks[event] = kept
 
 	return save(path, settings)
+}
+
+func syncCommand(binary string, args []string) string {
+	parts := []string{fmt.Sprintf("%q", binary), "sync"}
+	for _, a := range args {
+		if strings.ContainsAny(a, " \t\"'$`\\;&|<>(){}*?[]#~") {
+			a = fmt.Sprintf("%q", a)
+		}
+		parts = append(parts, a)
+	}
+	return strings.Join(append(parts, marker), " ")
 }
 
 // Remove deletes claudectl-owned hooks for the event, leaving any hooks

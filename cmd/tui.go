@@ -2,25 +2,19 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/batrashubham/claudectl/internal/index"
-	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/batrashubham/claudectl/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func runTUI() error {
-	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
-	sessions, err := builder.Build()
+	sessions, err := env.Index()
 	if err != nil {
 		return fmt.Errorf("build index: %w", err)
 	}
 
-	model := tui.NewModel(cfg, sessions)
+	model := tui.NewModel(env, sessions)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
@@ -28,106 +22,52 @@ func runTUI() error {
 		return err
 	}
 
-	// Check post-TUI actions
-	if m, ok := finalModel.(tui.Model); ok {
-		// Resume a session
-		if resumeID := m.ResumeID(); resumeID != "" {
-			var target *index.SessionMeta
-			for i := range sessions {
-				if sessions[i].ID == resumeID {
-					target = &sessions[i]
-					break
-				}
-			}
-			if target == nil {
-				fmt.Fprintf(os.Stderr, "session %s not found\n", resumeID)
-				os.Exit(1)
-			}
+	m, ok := finalModel.(tui.Model)
+	if !ok {
+		return nil
+	}
 
-			locator := session.NewLocator(cfg.ClaudeDir, cfg.BackupDir)
-			loc := locator.Locate(target.ID, target.ProjectDir)
-			if loc.ActivePath == "" && loc.ArchivedPath == "" {
-				fmt.Fprintf(os.Stderr, "Cannot resume: session file was deleted before backup. Only history metadata remains.\n")
-				os.Exit(1)
-			}
-			return locator.Resume(target.ID, target.ProjectDir, target.Project)
+	if key := m.ResumeID(); key != "" {
+		target, err := findSession(key)
+		if err != nil {
+			return err
 		}
+		return env.Resume(*target)
+	}
 
-		// Spawn from template
-		if tmplName := m.SpawnTemplate(); tmplName != "" {
-			store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
-			projectDir := findTemplateProjectDir(store, tmplName)
-			if projectDir == "" {
-				fmt.Fprintf(os.Stderr, "template '%s' not found\n", tmplName)
-				os.Exit(1)
-			}
-
-			result, err := store.Spawn(projectDir, tmplName)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "spawn failed: %v\n", err)
-				os.Exit(1)
-			}
-
-			fmt.Printf("Spawned session %s from template '%s'\n", result.SessionID[:12], tmplName)
-			claudeBin, err := exec.LookPath("claude")
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "claude not found in PATH\n")
-				os.Exit(1)
-			}
-			if result.Project != "" {
-				if _, err := os.Stat(result.Project); err == nil {
-					os.Chdir(result.Project)
-				}
-			}
-			return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID}, os.Environ())
+	if tmplName := m.SpawnTemplate(); tmplName != "" {
+		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+		projectDir := findTemplateProjectDir(store, tmplName)
+		if projectDir == "" {
+			return fmt.Errorf("template '%s' not found", tmplName)
 		}
-
-		// Rewarm template (spawn + rewarm prompt)
-		if tmplName := m.RewarmTemplate(); tmplName != "" {
-			store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
-			projectDir := findTemplateProjectDir(store, tmplName)
-			if projectDir == "" {
-				fmt.Fprintf(os.Stderr, "template '%s' not found\n", tmplName)
-				os.Exit(1)
-			}
-
-			result, err := store.Spawn(projectDir, tmplName)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "rewarm failed: %v\n", err)
-				os.Exit(1)
-			}
-
-			fmt.Printf("Rewarming template '%s' → session %s\n", tmplName, result.SessionID[:12])
-			fmt.Printf("When done, save back: claudectl template save %s --name %s --force --trim\n", result.SessionID, tmplName)
-			claudeBin, err := exec.LookPath("claude")
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "claude not found in PATH\n")
-				os.Exit(1)
-			}
-			if result.Project != "" {
-				if _, err := os.Stat(result.Project); err == nil {
-					os.Chdir(result.Project)
-				}
-			}
-			// Use custom rewarm prompt from template meta, or default
-			meta, _ := store.ReadMeta(projectDir, tmplName)
-			rewarmPrompt := template.DefaultRewarmPrompt
-			if meta != nil && meta.RewarmPrompt != "" {
-				rewarmPrompt = meta.RewarmPrompt
-			}
-			return syscall.Exec(claudeBin, []string{"claude", "--resume", result.SessionID, "-p", rewarmPrompt}, os.Environ())
+		result, err := store.Spawn(projectDir, tmplName)
+		if err != nil {
+			return fmt.Errorf("spawn failed: %w", err)
 		}
+		fmt.Printf("Spawned session %s from template '%s'\n", shortID(result.SessionID), tmplName)
+		return execClaude(result, "--resume", result.SessionID)
+	}
+
+	if tmplName := m.RewarmTemplate(); tmplName != "" {
+		store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
+		projectDir := findTemplateProjectDir(store, tmplName)
+		if projectDir == "" {
+			return fmt.Errorf("template '%s' not found", tmplName)
+		}
+		result, err := store.Spawn(projectDir, tmplName)
+		if err != nil {
+			return fmt.Errorf("rewarm failed: %w", err)
+		}
+		fmt.Printf("Rewarming template '%s' → session %s\n", tmplName, shortID(result.SessionID))
+		fmt.Printf("When done, save back: claudectl template save %s --name %s --force --trim\n", result.SessionID, tmplName)
+		meta, _ := store.ReadMeta(projectDir, tmplName)
+		rewarmPrompt := template.DefaultRewarmPrompt
+		if meta != nil && meta.RewarmPrompt != "" {
+			rewarmPrompt = meta.RewarmPrompt
+		}
+		return execClaude(result, "--resume", result.SessionID, "-p", rewarmPrompt)
 	}
 
 	return nil
-}
-
-func findTemplateProjectDir(store *template.Store, name string) string {
-	all, _ := store.ListAll()
-	for _, t := range all {
-		if t.Name == name {
-			return t.ProjectDir
-		}
-	}
-	return ""
 }

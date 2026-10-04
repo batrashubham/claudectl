@@ -3,11 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
+	"github.com/batrashubham/claudectl/internal/config"
+	"github.com/batrashubham/claudectl/internal/harness"
+	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -16,12 +17,11 @@ import (
 var (
 	importProject string
 	importResume  bool
-	importURL     string
 )
 
 var importCmd = &cobra.Command{
 	Use:   "import [file]",
-	Short: "Import a session from a .jsonl file",
+	Short: "Import a Claude Code session from a .jsonl file",
 	Long: `Import a session from an exported .jsonl session file.
 Enables team session sharing — one person exports, another imports.
 
@@ -29,13 +29,8 @@ The file is copied into your local Claude projects directory with a new
 session UUID so it doesn't conflict with the original.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if importURL != "" {
-			fmt.Println("URL import not yet supported")
-			return nil
-		}
-
 		if len(args) == 0 {
-			return fmt.Errorf("file argument is required (or use --url)")
+			return fmt.Errorf("file argument is required")
 		}
 
 		srcPath := args[0]
@@ -45,6 +40,10 @@ session UUID so it doesn't conflict with the original.`,
 
 		if importProject == "" {
 			return fmt.Errorf("--project is required")
+		}
+		project, err := filepath.Abs(config.ExpandHome(importProject))
+		if err != nil {
+			return fmt.Errorf("resolve project path: %w", err)
 		}
 
 		srcFile, err := os.Open(srcPath)
@@ -61,7 +60,7 @@ session UUID so it doesn't conflict with the original.`,
 		newID := uuid.New().String()
 
 		// Encode project path to directory name
-		projectDir := strings.ReplaceAll(importProject, "/", "-")
+		projectDir := harness.EncodeClaudeProject(project)
 
 		// Create destination directory
 		destDir := filepath.Join(cfg.ClaudeDir, "projects", projectDir)
@@ -84,19 +83,16 @@ session UUID so it doesn't conflict with the original.`,
 
 		fmt.Printf("Imported session %s (%d lines)\n", newID, lineCount)
 		fmt.Printf("  Source: %s\n", srcPath)
-		fmt.Printf("  Project: %s\n", importProject)
+		fmt.Printf("  Project: %s\n", project)
 		fmt.Printf("  Stored at: %s\n", destPath)
 
 		if importResume {
 			fmt.Println("  Resuming...")
-			claudeBin, err := exec.LookPath("claude")
+			claude, err := env.Harness("claude")
 			if err != nil {
-				return fmt.Errorf("claude CLI not found: %w", err)
+				return err
 			}
-			if _, err := os.Stat(importProject); err == nil {
-				os.Chdir(importProject)
-			}
-			return syscall.Exec(claudeBin, []string{"claude", "--resume", newID}, os.Environ())
+			return session.Exec(env.Bin(claude), []string{"--resume", newID}, project)
 		}
 
 		fmt.Printf("  Resume with: claude --resume %s\n", newID)
@@ -107,7 +103,6 @@ session UUID so it doesn't conflict with the original.`,
 func init() {
 	importCmd.Flags().StringVarP(&importProject, "project", "p", "", "Project path (required)")
 	importCmd.Flags().BoolVarP(&importResume, "resume", "r", false, "Immediately resume after import")
-	importCmd.Flags().StringVar(&importURL, "url", "", "Import from URL (not yet supported)")
 
 	rootCmd.AddCommand(importCmd)
 }
