@@ -195,3 +195,26 @@ func TestProjectDir_MatchesClaudeEncoding(t *testing.T) {
 		}
 	}
 }
+
+func TestBuild_HistoryLineOverOneMBDoesNotEndScan(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudeDir := filepath.Join(tmpDir, "claude")
+	os.MkdirAll(claudeDir, 0755)
+
+	big := make([]byte, 3<<20)
+	for i := range big {
+		big[i] = 'x'
+	}
+	writeHistoryJSONL(t, filepath.Join(claudeDir, "history.jsonl"), []HistoryEntry{
+		{Display: string(big), Timestamp: 1000, Project: "/proj/a", SessionID: "session-big"},
+		{Display: "after", Timestamp: 2000, Project: "/proj/a", SessionID: "session-after"},
+	})
+
+	sessions, err := NewBuilder(claudeDir, filepath.Join(tmpDir, "backup")).Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 {
+		t.Errorf("expected 2 sessions, got %d", len(sessions))
+	}
+}

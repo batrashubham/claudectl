@@ -66,7 +66,7 @@ func (b *Builder) parseHistoryFile(path string, sessions map[string]*SessionMeta
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), MaxLine)
 
 	for scanner.Scan() {
 		var entry HistoryEntry
@@ -185,6 +185,10 @@ func (b *Builder) resolveStatus(s *SessionMeta) {
 	}
 }
 
+// MaxLine bounds one JSONL line. Pasted content and tool results can exceed
+// the 1 MB scanner default, which would silently end the scan.
+const MaxLine = 256 << 20
+
 var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 // ProjectDir encodes a project path the way Claude Code names its
@@ -226,7 +230,7 @@ func (b *Builder) GetSessionEntries(sessionID string) ([]HistoryEntry, error) {
 
 	var entries []HistoryEntry
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), MaxLine)
 
 	for scanner.Scan() {
 		var entry HistoryEntry

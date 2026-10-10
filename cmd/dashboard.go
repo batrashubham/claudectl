@@ -363,7 +363,7 @@ func loadAllHistoryEntries(claudeDir, backupDir string) []index.HistoryEntry {
 			continue
 		}
 		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		scanner.Buffer(make([]byte, 64*1024), index.MaxLine)
 		for scanner.Scan() {
 			var entry index.HistoryEntry
 			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
