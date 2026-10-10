@@ -13,15 +13,21 @@ type Result struct {
 	NewFiles     int
 	UpdatedFiles int
 	TotalBytes   int64
+	Migrated     bool
 }
 
 type Engine struct {
 	claudeDir string
 	backupDir string
+	machine   string
 }
 
-func NewEngine(claudeDir, backupDir string) *Engine {
-	return &Engine{claudeDir: claudeDir, backupDir: backupDir}
+func NewEngine(claudeDir, backupDir, machine string) *Engine {
+	return &Engine{claudeDir: claudeDir, backupDir: backupDir, machine: machine}
+}
+
+func (e *Engine) machineDir() string {
+	return filepath.Join(e.backupDir, "machines", e.machine)
 }
 
 func (e *Engine) lockPath() string {
@@ -62,9 +68,14 @@ func (e *Engine) Sync() (*Result, error) {
 
 	result := &Result{}
 
-	// Sync history.jsonl
+	migrated, err := e.migrateFlatLayout()
+	if err != nil {
+		return nil, fmt.Errorf("migrate backup to machines/%s: %w", e.machine, err)
+	}
+	result.Migrated = migrated
+
 	histSrc := filepath.Join(e.claudeDir, "history.jsonl")
-	histDst := filepath.Join(e.backupDir, "history.jsonl")
+	histDst := filepath.Join(e.machineDir(), "history.jsonl")
 	if synced, bytes, err := e.syncFile(histSrc, histDst); err == nil && synced {
 		result.UpdatedFiles++
 		result.TotalBytes += bytes
@@ -72,9 +83,9 @@ func (e *Engine) Sync() (*Result, error) {
 
 	// Sync projects directory
 	projectsSrc := filepath.Join(e.claudeDir, "projects")
-	projectsDst := filepath.Join(e.backupDir, "projects")
+	projectsDst := filepath.Join(e.machineDir(), "projects")
 
-	err := filepath.Walk(projectsSrc, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(projectsSrc, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip unreadable files
 		}
@@ -152,7 +163,7 @@ func (e *Engine) syncFile(src, dst string) (synced bool, bytes int64, err error)
 }
 
 func (e *Engine) GitCommit(result *Result) error {
-	if result.NewFiles == 0 && result.UpdatedFiles == 0 {
+	if result.NewFiles == 0 && result.UpdatedFiles == 0 && !result.Migrated {
 		return nil
 	}
 
@@ -179,7 +190,10 @@ func (e *Engine) GitCommit(result *Result) error {
 		return nil // nothing staged
 	}
 
-	msg := fmt.Sprintf("sync: %d new, %d updated", result.NewFiles, result.UpdatedFiles)
+	msg := fmt.Sprintf("sync(%s): %d new, %d updated", e.machine, result.NewFiles, result.UpdatedFiles)
+	if result.Migrated {
+		msg = fmt.Sprintf("migrate: move flat backup into machines/%s; %s", e.machine, msg)
+	}
 	if err := runGit(gitDir, "commit", "--no-gpg-sign", "-m", msg); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
@@ -229,10 +243,19 @@ func (e *Engine) GitPush() error {
 		return fmt.Errorf("no git remote configured")
 	}
 
+	if err := runGit(gitDir, "push", "-u", "origin", "main"); err == nil {
+		return nil
+	}
+
+	// Rejected, most likely because another machine pushed. Machines write
+	// to separate folders, so rebasing onto theirs doesn't conflict.
+	if err := runGit(gitDir, "-c", "commit.gpgsign=false", "pull", "--rebase", "origin", "main"); err != nil {
+		runGit(gitDir, "rebase", "--abort")
+		return fmt.Errorf("git push rejected and rebase onto remote failed: %w", err)
+	}
 	if err := runGit(gitDir, "push", "-u", "origin", "main"); err != nil {
 		return fmt.Errorf("git push failed (check SSH keys / remote access): %w", err)
 	}
-
 	return nil
 }
 
@@ -428,4 +451,32 @@ func (e *Engine) SquashOlderThan(days int) (int, error) {
 		return len(lines), err
 	}
 	return len(lines), nil
+}
+
+// Lock holds the sync lock so other backup writers don't race a running sync.
+func (e *Engine) Lock() (unlock func(), err error) {
+	if err := e.acquireLock(); err != nil {
+		return nil, err
+	}
+	return e.releaseLock, nil
+}
+
+// Commit stages everything in the backup and commits it with msg, if there
+// is anything to commit.
+func (e *Engine) Commit(msg string) error {
+	if _, err := os.Stat(filepath.Join(e.backupDir, ".git")); os.IsNotExist(err) {
+		return nil
+	}
+	if err := runGit(e.backupDir, "add", "-A"); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	cmd := exec.Command("git", "diff", "--cached", "--quiet")
+	cmd.Dir = e.backupDir
+	if cmd.Run() == nil {
+		return nil
+	}
+	if err := runGit(e.backupDir, "commit", "--no-gpg-sign", "-m", msg); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	return nil
 }

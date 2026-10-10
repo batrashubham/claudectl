@@ -1,8 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -14,7 +17,41 @@ type Config struct {
 	GitAutoCommit bool   `toml:"git_auto_commit"`
 	GitRemote     string `toml:"git_remote"`
 	GitPush       bool   `toml:"git_push"`
+	MachineName   string `toml:"machine_name"`
 	TemplatesDir  string `toml:"-"` // derived from BackupDir, not stored in config
+
+	// MachineNameDefaulted is set when machine_name was absent and the
+	// hostname was used instead.
+	MachineNameDefaulted bool `toml:"-"`
+}
+
+// MachineDir is where this machine's sessions live in the backup.
+func (c *Config) MachineDir() string {
+	return filepath.Join(MachinesDir(c.BackupDir), c.MachineName)
+}
+
+func MachinesDir(backupDir string) string {
+	return filepath.Join(backupDir, "machines")
+}
+
+var validMachine = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+func ValidateMachineName(name string) error {
+	if !validMachine.MatchString(name) {
+		return fmt.Errorf("machine name %q must be lowercase letters, digits and hyphens (e.g. 'work-laptop')", name)
+	}
+	return nil
+}
+
+// DefaultMachineName derives a valid machine name from the hostname.
+func DefaultMachineName() string {
+	host, _ := os.Hostname()
+	host = strings.ToLower(strings.TrimSuffix(host, ".local"))
+	host = strings.Trim(regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(host, "-"), "-")
+	if host == "" {
+		return "default"
+	}
+	return host
 }
 
 func DefaultConfig() *Config {
@@ -28,6 +65,13 @@ func DefaultConfig() *Config {
 		GitRemote:     "",
 		GitPush:       false,
 		TemplatesDir:  filepath.Join(backupDir, "templates"),
+	}
+}
+
+func (c *Config) defaultMachine() {
+	if c.MachineName == "" {
+		c.MachineName = DefaultMachineName()
+		c.MachineNameDefaulted = true
 	}
 }
 
@@ -50,6 +94,7 @@ func Load() (*Config, error) {
 	path := ConfigPath()
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
+		cfg.defaultMachine()
 		return cfg, nil
 	}
 
@@ -61,6 +106,7 @@ func Load() (*Config, error) {
 	cfg.BackupDir = expandHome(cfg.BackupDir)
 	cfg.ClaudeDir = expandHome(cfg.ClaudeDir)
 	cfg.TemplatesDir = filepath.Join(cfg.BackupDir, "templates")
+	cfg.defaultMachine()
 
 	return cfg, nil
 }

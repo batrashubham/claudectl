@@ -54,6 +54,24 @@ func runSetup() error {
 	}
 	fmt.Printf("  ✓ Backup directory: %s\n\n", backupDir)
 
+	fmt.Println("  Name this machine. Sessions are kept per machine in the backup,")
+	fmt.Println("  so one repo can hold e.g. 'work' and 'personal' side by side.")
+	machineName := cfg.MachineName
+	for {
+		fmt.Printf("  Machine name [%s]: ", machineName)
+		answer := strings.ToLower(readLine(reader))
+		if answer == "" {
+			break
+		}
+		if err := config.ValidateMachineName(answer); err != nil {
+			fmt.Printf("  ⚠ %v\n", err)
+			continue
+		}
+		machineName = answer
+		break
+	}
+	fmt.Printf("  ✓ Machine: %s\n\n", machineName)
+
 	// 2. Git remote
 	fmt.Println("  Do you want to push backups to a git remote?")
 	fmt.Println("  This keeps your sessions safe even if your machine is lost.")
@@ -62,7 +80,7 @@ func runSetup() error {
 	gitPush := gitRemote != ""
 
 	if gitPush {
-		engine := sync.NewEngine(filepath.Join(home, ".claude"), backupDir)
+		engine := sync.NewEngine(filepath.Join(home, ".claude"), backupDir, machineName)
 		if err := engine.GitSetupRemote(gitRemote); err != nil {
 			fmt.Printf("  ⚠ Could not configure remote: %v\n", err)
 			fmt.Println("  You can set this up later in ~/.claudectl/config.toml")
@@ -109,6 +127,7 @@ func runSetup() error {
 		GitAutoCommit: true,
 		GitRemote:     gitRemote,
 		GitPush:       gitPush,
+		MachineName:   machineName,
 	}
 
 	if err := config.Save(newCfg); err != nil {

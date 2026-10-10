@@ -155,7 +155,7 @@ func TestSync_FullFlow(t *testing.T) {
 	os.WriteFile(filepath.Join(claudeDir, "history.jsonl"), []byte(`{"id":"1"}`+"\n"), 0644)
 	os.WriteFile(filepath.Join(claudeDir, "projects", "proj1", "session.jsonl"), []byte(`{"ts":"now"}`+"\n"), 0644)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := NewEngine(claudeDir, backupDir, "m1")
 	result, err := e.Sync()
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)
@@ -168,7 +168,7 @@ func TestSync_FullFlow(t *testing.T) {
 	}
 
 	// Verify history.jsonl was copied
-	histContent, err := os.ReadFile(filepath.Join(backupDir, "history.jsonl"))
+	histContent, err := os.ReadFile(filepath.Join(backupDir, "machines", "m1", "history.jsonl"))
 	if err != nil {
 		t.Fatalf("history.jsonl not copied: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestSync_FullFlow(t *testing.T) {
 	}
 
 	// Verify project file was copied
-	sessContent, err := os.ReadFile(filepath.Join(backupDir, "projects", "proj1", "session.jsonl"))
+	sessContent, err := os.ReadFile(filepath.Join(backupDir, "machines", "m1", "projects", "proj1", "session.jsonl"))
 	if err != nil {
 		t.Fatalf("session.jsonl not copied: %v", err)
 	}
@@ -200,20 +200,20 @@ func TestSync_SkipsMemoryDirectories(t *testing.T) {
 	os.MkdirAll(filepath.Join(claudeDir, "projects", "proj1"), 0755)
 	os.WriteFile(filepath.Join(claudeDir, "projects", "proj1", "session.jsonl"), []byte("session data"), 0644)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := NewEngine(claudeDir, backupDir, "m1")
 	_, err := e.Sync()
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)
 	}
 
 	// The memory file should NOT exist in backup
-	memoryDst := filepath.Join(backupDir, "projects", "proj1", "memory", "foo.md")
+	memoryDst := filepath.Join(backupDir, "machines", "m1", "projects", "proj1", "memory", "foo.md")
 	if _, err := os.Stat(memoryDst); err == nil {
 		t.Error("memory/foo.md should NOT be copied to backup")
 	}
 
 	// The normal file should exist
-	sessDst := filepath.Join(backupDir, "projects", "proj1", "session.jsonl")
+	sessDst := filepath.Join(backupDir, "machines", "m1", "projects", "proj1", "session.jsonl")
 	if _, err := os.Stat(sessDst); err != nil {
 		t.Error("session.jsonl should be copied to backup")
 	}
@@ -227,7 +227,7 @@ func TestSync_LockfilePreventsConccurentSync(t *testing.T) {
 	os.MkdirAll(filepath.Join(claudeDir, "projects"), 0755)
 	os.MkdirAll(backupDir, 0755)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := NewEngine(claudeDir, backupDir, "m1")
 
 	// Manually create the lock file at the engine's expected path
 	lockPath := e.lockPath()
@@ -270,7 +270,7 @@ func TestSync_TemplatesInBackupSurviveSync(t *testing.T) {
 	// Pre-place a template in backup/templates/
 	os.WriteFile(filepath.Join(backupDir, "templates", "meta.json"), []byte(`{"name":"warm"}`), 0644)
 
-	e := NewEngine(claudeDir, backupDir)
+	e := NewEngine(claudeDir, backupDir, "m1")
 	_, err := e.Sync()
 	if err != nil {
 		t.Fatalf("Sync() error: %v", err)

@@ -60,8 +60,14 @@ claudectl sync           # One-shot sync
 claudectl sync --watch   # Continuous sync (every 5m, configurable)
 claudectl list           # Plain text session list
 claudectl list --json    # JSON output for scripting
+claudectl list -a        # Include sessions from all machines
 claudectl search kafka timeout   # Full-text search (all words must match)
 claudectl search '"consumer group"' --json   # Exact phrase, JSON output
+claudectl search -a redis       # Search every machine's sessions
+claudectl machine        # List machines in the backup
+claudectl machine rename work   # Rename this machine
+claudectl copy <id> --to personal              # Copy a session to another machine
+claudectl copy <id> --to personal -p ~/code/x  # ...under a different project path
 claudectl resume <id>    # Resume a session directly by ID
 claudectl restore        # Pull latest backup from git remote
 claudectl export <id>    # Export session as readable markdown
@@ -127,6 +133,7 @@ TEMPLATES            │    ○ api-service                          3w
 | `d` | Delete template (when focused in sidebar) |
 | `/` | Full-text search across transcripts (all words, any order; `"quote"` for phrases) |
 | `f` | Cycle filter: All → Active → Archive → Ghost |
+| `m` | Toggle this machine / all machines |
 | `s` | Sync now |
 | `g/G` | Jump to top/bottom |
 | `Shift+D` | Usage dashboard (stats, activity, tokens) |
@@ -226,7 +233,33 @@ claudectl restore
 claudectl
 ```
 
-This is backup/restore, not real-time sync — you control when to push and when to pull.
+This is backup/restore, not real-time sync — you control when to pull.
+
+## Multiple Machines
+
+One backup repo can hold several machines — say `work` and `personal` — each in its own folder (`machines/<name>/`). Every machine only writes to its own folder, so they never overwrite each other.
+
+```bash
+claudectl machine rename work   # name this machine (default: hostname)
+claudectl machine               # list machines and session counts
+```
+
+The TUI, `list`, and `search` show this machine's sessions by default. Press `m` in the TUI (or pass `-a`) to see every machine's; each session is labelled with its machine. Resuming another machine's session copies it here first.
+
+To hand a session to another machine:
+
+```bash
+claudectl copy <id> --to personal                      # same project path there
+claudectl copy <id> --to personal -p ~/code/my-app     # different path there
+```
+
+The copy is committed and pushed; run `claudectl restore` on the other machine to pull it. With `-p`, the copy gets a new session ID and its working directories are rewritten to the new path.
+
+If another machine pushed since your last pull, `sync` rebases onto it and pushes again. This can't conflict, because machines write to separate folders.
+
+Upgrading from a flat backup: the first `sync` moves the existing `projects/` and `history.jsonl` into `machines/<this machine>/`. If you want a name other than the hostname, run `claudectl machine rename <name>` before or after.
+
+Work under NDA? Keep it out of a shared repo entirely: point that machine's `backup_dir` at a separate repo.
 
 ## Automatic Backup
 
@@ -272,6 +305,7 @@ sync_on_start = true
 git_auto_commit = true
 git_remote = "git@github.com:you/claude-backup.git"
 git_push = true
+machine_name = "work"
 ```
 
 | Field | Default | Description |
@@ -282,6 +316,7 @@ git_push = true
 | `git_auto_commit` | `true` | Commit after each sync |
 | `git_remote` | `""` | Git remote URL for pushing backups |
 | `git_push` | `false` | Push to remote after each commit |
+| `machine_name` | hostname | This machine's folder in the backup (`machines/<name>/`). Saved on first run so a hostname change doesn't split the backup |
 
 Templates are stored at `<backup_dir>/templates/` — automatically git-versioned with the rest of your backup.
 
@@ -289,7 +324,7 @@ Templates are stored at `<backup_dir>/templates/` — automatically git-versione
 
 ### Sync
 
-`claudectl` walks `~/.claude/projects/` and copies session files to the backup directory:
+`claudectl` walks `~/.claude/projects/` and copies session files to this machine's folder in the backup:
 - **New files**: copied immediately
 - **Growing files**: overwritten (sessions only grow via append)
 - **Never deletes**: if a session is removed from source, the backup keeps it
@@ -325,19 +360,24 @@ When you resume an archived session:
 ├── cache/search/             # extracted search text (local, not backed up)
 └── backup/                   # git repo (synced + pushed)
     ├── .gitattributes        # merge=union for history.jsonl
-    ├── history.jsonl
-    ├── templates/            # session templates (project-scoped)
+    ├── templates/            # session templates (shared by all machines)
     │   └── -Users-you-code-project-a/
     │       └── warm-context/
     │           ├── meta.json
     │           └── session.jsonl
-    └── projects/
-        ├── -Users-you-code-project-a/
-        │   ├── abc123.jsonl
-        │   └── abc123/
-        │       └── subagents/
-        └── -Users-you-code-project-b/
-            └── def456.jsonl
+    └── machines/
+        ├── work/
+        │   ├── history.jsonl
+        │   └── projects/
+        │       ├── -Users-you-code-project-a/
+        │       │   ├── abc123.jsonl
+        │       │   └── abc123/
+        │       │       └── subagents/
+        │       └── -Users-you-code-project-b/
+        │           └── def456.jsonl
+        └── personal/
+            ├── history.jsonl
+            └── projects/
 ```
 
 ## Security

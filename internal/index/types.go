@@ -39,10 +39,19 @@ type SessionMeta struct {
 	Status      SessionStatus
 	FileSize    int64
 	SearchText  string // All prompts concatenated (lowercase) for full-text search
+	Machine     string // Machine the session belongs to; this machine if it exists here
 
 	// Used during index building
 	activeExists    bool
 	archivedExists  bool
 	firstPromptTime time.Time
 	lastPromptTime  time.Time
+	machines        map[string]bool
+}
+
+func (s *SessionMeta) addMachine(m string) {
+	if s.machines == nil {
+		s.machines = make(map[string]bool)
+	}
+	s.machines[m] = true
 }

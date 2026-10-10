@@ -15,7 +15,7 @@ func CacheDir() string {
 // BuildForSessions indexes each session's transcript, preferring the live
 // copy over the backup. Ghost sessions are searchable by their prompts only.
 func BuildForSessions(cfg *config.Config, sessions []index.SessionMeta) (*Index, error) {
-	locator := session.NewLocator(cfg.ClaudeDir, cfg.BackupDir)
+	locator := session.NewLocator(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 	docs := make([]Doc, 0, len(sessions))
 	for _, s := range sessions {
 		loc := locator.Locate(s.ID, s.ProjectDir)

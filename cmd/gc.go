@@ -30,7 +30,7 @@ runs 'git gc --aggressive' to compress them.
 squashing older bloat. --squash discards all history. Sessions are always
 preserved regardless.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
+		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 
 		beforeRepo, _ := engine.RepoSize()
 		beforeGit, _ := engine.GitDirSize()

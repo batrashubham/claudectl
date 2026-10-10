@@ -17,10 +17,11 @@ No test suite yet — verify by building and running commands.
 ## Architecture
 
 ```
-cmd/              # Cobra CLI commands (root, sync, list, resume, restore, template, cron, setup, config)
+cmd/              # Cobra CLI commands (root, sync, list, search, resume, restore, copy, machine, template, hook, cron, setup, config)
 internal/
   config/         # TOML config at ~/.claudectl/config.toml
-  index/          # Session index: merges history.jsonl + filesystem walk
+  index/          # Session index: merges history.jsonl + filesystem walk, across machines
+  search/         # Full-text transcript search with a size-keyed local cache
   session/        # Locate, restore, resume (syscall.Exec)
   sync/           # Append-only copy engine + git commit/push + lockfile
   template/       # Save/spawn/list/delete session templates
@@ -31,7 +32,9 @@ internal/
 
 - **Append-only sync**: never delete from backup. Copy if dest missing or source larger.
 - **Session ID rewriting**: templates use `strings.ReplaceAll(line, oldUUID, newUUID)` streaming line-by-line. Safe because UUID is unique 36-char string.
-- **No background pulls**: `restore` is manual-only. Sync only pushes.
+- **Per-machine backup**: each machine writes only to `machines/<machine_name>/` (projects + history.jsonl); templates are shared at the root. A flat pre-machines backup is merged into this machine's folder on the next sync and still read as this machine's until then.
+- **No background pulls**: `restore` is manual. Sync only pulls (`pull --rebase`) when a push is rejected, which is conflict-free because machines write to separate folders.
+- **Copy, not move**: `copy` writes into another machine's folder. A relocated copy (`--project`) gets a new session ID so one ID never maps to two project dirs.
 - **Lockfile**: `~/.claudectl/.sync.lock` prevents concurrent sync races.
 - **Git signing disabled**: all commits use `--no-gpg-sign` (1Password agent conflicts).
 - **Ghost sessions** (FileSize==0): exist in history.jsonl only, file was deleted before backup. Hidden from default view, shown in Ghost filter tab.

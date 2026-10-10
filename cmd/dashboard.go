@@ -52,11 +52,12 @@ var (
 )
 
 func runDashboard() error {
-	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
+	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 	sessions, err := builder.Build()
 	if err != nil {
 		return fmt.Errorf("building session index: %w", err)
 	}
+	sessions = index.ForMachine(sessions, cfg.MachineName)
 
 	entries := loadAllHistoryEntries(cfg.ClaudeDir, cfg.BackupDir)
 
@@ -354,10 +355,7 @@ func loadAllHistoryEntries(claudeDir, backupDir string) []index.HistoryEntry {
 	seen := make(map[string]bool)
 	var entries []index.HistoryEntry
 
-	for _, path := range []string{
-		filepath.Join(claudeDir, "history.jsonl"),
-		filepath.Join(backupDir, "history.jsonl"),
-	} {
+	for _, path := range index.HistoryFiles(claudeDir, backupDir, cfg.MachineName) {
 		f, err := os.Open(path)
 		if err != nil {
 			continue

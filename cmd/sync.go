@@ -36,9 +36,9 @@ func init() {
 }
 
 func runSyncOnce() error {
-	engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
+	engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 
-	fmt.Printf("Syncing %s → %s\n", cfg.ClaudeDir+"/projects", cfg.BackupDir)
+	fmt.Printf("Syncing %s → %s\n", cfg.ClaudeDir+"/projects", cfg.MachineDir())
 
 	// Setup remote if configured
 	if cfg.GitRemote != "" {
@@ -52,6 +52,9 @@ func runSyncOnce() error {
 		return err
 	}
 
+	if result.Migrated {
+		fmt.Printf("Moved existing backup into machines/%s/ (rename with 'claudectl machine rename <name>')\n", cfg.MachineName)
+	}
 	fmt.Printf("Done: %d new, %d updated (%s)\n",
 		result.NewFiles, result.UpdatedFiles, humanize.Bytes(uint64(result.TotalBytes)))
 
@@ -74,12 +77,12 @@ func runSyncOnce() error {
 
 func runSyncWatch() error {
 	fmt.Printf("Watching for changes every %s\n", syncInterval)
-	fmt.Printf("Syncing %s → %s\n", cfg.ClaudeDir+"/projects", cfg.BackupDir)
+	fmt.Printf("Syncing %s → %s\n", cfg.ClaudeDir+"/projects", cfg.MachineDir())
 	fmt.Println("Press Ctrl+C to stop.")
 	fmt.Println()
 
 	for {
-		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
+		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 
 		if cfg.GitRemote != "" {
 			engine.GitSetupRemote(cfg.GitRemote)
@@ -88,7 +91,7 @@ func runSyncWatch() error {
 		result, err := engine.Sync()
 		if err != nil {
 			fmt.Printf("[%s] error: %v\n", time.Now().Format("15:04:05"), err)
-		} else if result.NewFiles > 0 || result.UpdatedFiles > 0 {
+		} else if result.NewFiles > 0 || result.UpdatedFiles > 0 || result.Migrated {
 			fmt.Printf("[%s] synced: %d new, %d updated (%s)\n",
 				time.Now().Format("15:04:05"),
 				result.NewFiles, result.UpdatedFiles,

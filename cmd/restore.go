@@ -18,7 +18,7 @@ Use this to restore your backed-up sessions on a new or different machine.
 If the backup directory doesn't exist yet and a git_remote is configured,
 this will clone the repo. Otherwise it pulls the latest changes.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir)
+		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 
 		if cfg.GitRemote == "" {
 			return fmt.Errorf("no git_remote configured — set it in ~/.claudectl/config.toml or run 'claudectl setup'")

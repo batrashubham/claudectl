@@ -261,10 +261,7 @@ func (m Model) loadHistoryEntries() []index.HistoryEntry {
 	seen := make(map[string]bool)
 	var entries []index.HistoryEntry
 
-	for _, path := range []string{
-		filepath.Join(m.config.ClaudeDir, "history.jsonl"),
-		filepath.Join(m.config.BackupDir, "history.jsonl"),
-	} {
+	for _, path := range index.HistoryFiles(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName) {
 		f, err := os.Open(path)
 		if err != nil {
 			continue

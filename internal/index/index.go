@@ -15,25 +15,74 @@ import (
 type Builder struct {
 	claudeDir string
 	backupDir string
+	machine   string
 }
 
-func NewBuilder(claudeDir, backupDir string) *Builder {
-	return &Builder{claudeDir: claudeDir, backupDir: backupDir}
+func NewBuilder(claudeDir, backupDir, machine string) *Builder {
+	return &Builder{claudeDir: claudeDir, backupDir: backupDir, machine: machine}
+}
+
+// source is one place sessions are read from, and the machine they belong to.
+type source struct {
+	dir     string
+	machine string
+	status  SessionStatus
+}
+
+// sources lists the live Claude dir, this machine's backup, the pre-machines
+// flat backup (treated as this machine's), then every other machine.
+func (b *Builder) sources() []source {
+	srcs := []source{
+		{b.claudeDir, b.machine, StatusActive},
+		{filepath.Join(b.backupDir, "machines", b.machine), b.machine, StatusArchived},
+		{b.backupDir, b.machine, StatusArchived},
+	}
+	for _, m := range Machines(b.backupDir) {
+		if m != b.machine {
+			srcs = append(srcs, source{filepath.Join(b.backupDir, "machines", m), m, StatusArchived})
+		}
+	}
+	return srcs
+}
+
+// Machines lists the machine folders in the backup, sorted.
+func Machines(backupDir string) []string {
+	entries, _ := os.ReadDir(filepath.Join(backupDir, "machines"))
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// HistoryFiles are this machine's history files: live, backed up, and legacy.
+func HistoryFiles(claudeDir, backupDir, machine string) []string {
+	return []string{
+		filepath.Join(claudeDir, "history.jsonl"),
+		filepath.Join(backupDir, "machines", machine, "history.jsonl"),
+		filepath.Join(backupDir, "history.jsonl"),
+	}
 }
 
 func (b *Builder) Build() ([]SessionMeta, error) {
 	sessions := make(map[string]*SessionMeta)
+	seen := make(map[string]bool) // dedup key: sessionID+timestamp
 
-	if err := b.parseHistory(sessions); err != nil {
-		return nil, err
+	srcs := b.sources()
+	for _, src := range srcs {
+		b.parseHistoryFile(filepath.Join(src.dir, "history.jsonl"), src.machine, sessions, seen)
 	}
-
-	b.scanProjectsDir(sessions, b.claudeDir, StatusActive)
-	b.scanProjectsDir(sessions, b.backupDir, StatusArchived)
+	for _, src := range srcs {
+		b.scanProjectsDir(sessions, src)
+	}
 
 	result := make([]SessionMeta, 0, len(sessions))
 	for _, s := range sessions {
 		b.resolveStatus(s)
+		s.Machine = b.resolveMachine(s)
 		result = append(result, *s)
 	}
 
@@ -44,21 +93,24 @@ func (b *Builder) Build() ([]SessionMeta, error) {
 	return result, nil
 }
 
-func (b *Builder) parseHistory(sessions map[string]*SessionMeta) error {
-	// Merge both live and backup history files for resilience.
-	// If Claude cleans the live history.jsonl, the backup still has all prior entries.
-	seen := make(map[string]bool) // dedup key: sessionID+timestamp
-
-	livePath := filepath.Join(b.claudeDir, "history.jsonl")
-	backupPath := filepath.Join(b.backupDir, "history.jsonl")
-
-	b.parseHistoryFile(livePath, sessions, seen)
-	b.parseHistoryFile(backupPath, sessions, seen)
-
-	return nil
+// resolveMachine prefers this machine when a session exists here and on
+// another machine (e.g. after a copy).
+func (b *Builder) resolveMachine(s *SessionMeta) string {
+	if s.machines[b.machine] {
+		return b.machine
+	}
+	var names []string
+	for m := range s.machines {
+		names = append(names, m)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return b.machine
+	}
+	return names[0]
 }
 
-func (b *Builder) parseHistoryFile(path string, sessions map[string]*SessionMeta, seen map[string]bool) {
+func (b *Builder) parseHistoryFile(path, machine string, sessions map[string]*SessionMeta, seen map[string]bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return
@@ -93,6 +145,7 @@ func (b *Builder) parseHistoryFile(path string, sessions map[string]*SessionMeta
 			}
 			sessions[entry.SessionID] = s
 		}
+		s.addMachine(machine)
 
 		ts := time.UnixMilli(entry.Timestamp)
 		if s.FirstSeen.IsZero() || ts.Before(s.FirstSeen) {
@@ -118,8 +171,8 @@ func (b *Builder) parseHistoryFile(path string, sessions map[string]*SessionMeta
 	}
 }
 
-func (b *Builder) scanProjectsDir(sessions map[string]*SessionMeta, baseDir string, markStatus SessionStatus) {
-	projectsDir := filepath.Join(baseDir, "projects")
+func (b *Builder) scanProjectsDir(sessions map[string]*SessionMeta, src source) {
+	projectsDir := filepath.Join(src.dir, "projects")
 	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		return
@@ -150,15 +203,20 @@ func (b *Builder) scanProjectsDir(sessions map[string]*SessionMeta, baseDir stri
 
 			s, exists := sessions[sessionID]
 			if !exists {
+				project := firstCwd(filepath.Join(projPath, file.Name()))
+				if project == "" {
+					project = dirToProject(projDir)
+				}
 				s = &SessionMeta{
 					ID:         sessionID,
 					ProjectDir: projDir,
-					Project:    dirToProject(projDir),
+					Project:    project,
 				}
 				sessions[sessionID] = s
 			}
+			s.addMachine(src.machine)
 
-			if markStatus == StatusActive {
+			if src.status == StatusActive {
 				s.activeExists = true
 			} else {
 				s.archivedExists = true
@@ -217,30 +275,66 @@ func truncate(s string, maxLen int) string {
 }
 
 func (b *Builder) GetSessionEntries(sessionID string) ([]HistoryEntry, error) {
-	historyPath := filepath.Join(b.claudeDir, "history.jsonl")
-	if _, err := os.Stat(historyPath); os.IsNotExist(err) {
-		historyPath = filepath.Join(b.backupDir, "history.jsonl")
-	}
-
-	f, err := os.Open(historyPath)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
 	var entries []HistoryEntry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), MaxLine)
-
-	for scanner.Scan() {
-		var entry HistoryEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+	seen := make(map[int64]bool)
+	for _, src := range b.sources() {
+		f, err := os.Open(filepath.Join(src.dir, "history.jsonl"))
+		if err != nil {
 			continue
 		}
-		if entry.SessionID == sessionID && entry.Display != "" && !isCommand(entry.Display) {
-			entries = append(entries, entry)
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 64*1024), MaxLine)
+		for scanner.Scan() {
+			var entry HistoryEntry
+			if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+				continue
+			}
+			if entry.SessionID == sessionID && entry.Display != "" && !isCommand(entry.Display) && !seen[entry.Timestamp] {
+				seen[entry.Timestamp] = true
+				entries = append(entries, entry)
+			}
+		}
+		f.Close()
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Timestamp < entries[j].Timestamp })
+	return entries, nil
+}
+
+// firstCwd reads the project path a session started in, for sessions with no
+// history entry. Decoding the folder name is lossy ("-" could be "/" or "-").
+func firstCwd(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, 64*1024)
+	for i := 0; i < 20; i++ {
+		line, err := r.ReadSlice('\n')
+		var e struct {
+			Cwd string `json:"cwd"`
+		}
+		if json.Unmarshal(line, &e) == nil && e.Cwd != "" {
+			return e.Cwd
+		}
+		if err == bufio.ErrBufferFull {
+			for err == bufio.ErrBufferFull {
+				_, err = r.ReadSlice('\n')
+			}
+		}
+		if err != nil {
+			return ""
 		}
 	}
+	return ""
+}
 
-	return entries, scanner.Err()
+func ForMachine(sessions []SessionMeta, machine string) []SessionMeta {
+	var out []SessionMeta
+	for _, s := range sessions {
+		if s.Machine == machine {
+			out = append(out, s)
+		}
+	}
+	return out
 }

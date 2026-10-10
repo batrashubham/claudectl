@@ -158,8 +158,12 @@ type Model struct {
 	syncResult string
 	err        error
 
-	searchIdx   *search.Index
-	snippets    map[string]string
+	searchIdx *search.Index
+	snippets  map[string]string
+
+	allSessions []index.SessionMeta
+	machines    []string
+	allMachines bool
 	resumeID    string
 	spawnTmpl   string
 	rewarmTmpl  string
@@ -178,19 +182,35 @@ func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
 	store := template.NewStore(cfg.TemplatesDir, cfg.ClaudeDir)
 	templates, _ := store.ListAll()
 
-	sidebarItems := buildSidebarItems(sessions, templates)
-
 	m := Model{
-		state:        listView,
-		focus:        focusList,
-		sessions:     sessions,
-		templates:    templates,
-		search:       ti,
-		config:       cfg,
-		sidebarItems: sidebarItems,
+		state:     listView,
+		focus:     focusList,
+		templates: templates,
+		search:    ti,
+		config:    cfg,
+	}
+	m.setSessions(sessions)
+	return m
+}
+
+// setSessions replaces the full session list and narrows m.sessions to this
+// machine unless all machines are shown.
+func (m *Model) setSessions(all []index.SessionMeta) {
+	m.allSessions = all
+	m.machines = index.Machines(m.config.BackupDir)
+	if m.allMachines {
+		m.sessions = all
+	} else {
+		m.sessions = index.ForMachine(all, m.config.MachineName)
+	}
+	m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+	if m.sidebarCursor >= len(m.sidebarItems) {
+		m.sidebarCursor = max(0, len(m.sidebarItems)-1)
 	}
 	m.applyFilter()
-	return m
+	if m.cursor >= len(m.filtered) {
+		m.cursor = max(0, len(m.filtered)-1)
+	}
 }
 
 func (m Model) SpawnTemplate() string {
@@ -209,7 +229,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) buildSearchIndex() tea.Cmd {
-	cfg, sessions := m.config, m.sessions
+	cfg, sessions := m.config, m.allSessions
 	return func() tea.Msg {
 		idx, err := search.BuildForSessions(cfg, sessions)
 		if err != nil {
@@ -238,10 +258,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.syncResult = fmt.Sprintf("%d new, %d updated", msg.result.NewFiles, msg.result.UpdatedFiles)
 			m.lastSync = time.Now()
-			builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir)
+			builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName)
 			if sessions, err := builder.Build(); err == nil {
-				m.sessions = sessions
-				m.applyFilter()
+				m.setSessions(sessions)
 				return m, m.buildSearchIndex()
 			}
 		}
@@ -352,6 +371,12 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncResult = ""
 			return m, m.doSync()
 		}
+	case msg.String() == "m":
+		m.allMachines = !m.allMachines
+		m.sidebarCursor = 0
+		m.cursor = 0
+		m.offset = 0
+		m.setSessions(m.allSessions)
 	case msg.String() == "f":
 		m.filter = (m.filter + 1) % 4
 		m.applyFilter()
@@ -873,7 +898,15 @@ func (m Model) renderFilters() string {
 		}
 	}
 
-	return " " + strings.Join(parts, "  ")
+	bar := " " + strings.Join(parts, "  ")
+	if len(m.machines) > 1 || m.allMachines {
+		scope := "⌂ " + m.config.MachineName
+		if m.allMachines {
+			scope = fmt.Sprintf("⌂ all %d machines", len(m.machines))
+		}
+		bar += "   " + lipgloss.NewStyle().Foreground(purple2).Render(scope)
+	}
+	return bar
 }
 
 func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) string {
@@ -973,6 +1006,9 @@ func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) strin
 	if s.FileSize > 0 {
 		metaParts += "  ◈ " + humanize.Bytes(uint64(s.FileSize))
 	}
+	if m.allMachines {
+		metaParts += "  ⌂ " + s.Machine
+	}
 	line3 := "     " + lipgloss.NewStyle().Foreground(metaFg).Render(metaParts)
 
 	content := line1 + "\n" + line2 + "\n" + line3
@@ -1005,6 +1041,7 @@ func (m Model) renderHelp() string {
 		{"/", "search"},
 		{"s", "sync"},
 		{"f", "filter"},
+		{"m", "machines"},
 		{"D", "dashboard"},
 		{"q", "quit"},
 	}
@@ -1151,7 +1188,7 @@ func (m Model) viewDetail() string {
 }
 
 func (m Model) getSessionPrompts(sessionID string) []index.HistoryEntry {
-	builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir)
+	builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName)
 	entries, _ := builder.GetSessionEntries(sessionID)
 	return entries
 }
@@ -1166,7 +1203,7 @@ func (m Model) projectCount() int {
 
 func (m Model) doSync() tea.Cmd {
 	return func() tea.Msg {
-		engine := sync.NewEngine(m.config.ClaudeDir, m.config.BackupDir)
+		engine := sync.NewEngine(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName)
 
 		if m.config.GitRemote != "" {
 			engine.GitSetupRemote(m.config.GitRemote)

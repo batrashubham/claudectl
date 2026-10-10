@@ -55,7 +55,7 @@ func runStatus() error {
 	}
 
 	// Sessions count
-	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
+	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 	sessions, err := builder.Build()
 	if err == nil {
 		var active, archived, ghost int
@@ -73,6 +73,8 @@ func runStatus() error {
 	} else {
 		fmt.Printf("Sessions:   error reading index: %v\n", err)
 	}
+
+	fmt.Printf("Machine:    %s (%d in backup)\n", cfg.MachineName, len(index.Machines(cfg.BackupDir)))
 
 	// Last sync time (git log in backup dir)
 	lastSync := lastSyncTime(cfg.BackupDir)

@@ -20,7 +20,7 @@ var exportCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID := args[0]
 
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
+		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 		sessions, err := builder.Build()
 		if err != nil {
 			return err

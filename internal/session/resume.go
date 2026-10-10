@@ -20,6 +20,7 @@ func (l *Locator) Resume(sessionID, projectDir, projectPath string) error {
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "warning: project path %s no longer exists, resuming from current dir\n", projectPath)
+			fmt.Fprintf(os.Stderr, "hint: if it lives elsewhere on this machine, run: claudectl copy %s --project <path>\n", sessionID)
 		}
 	}
 

@@ -14,7 +14,7 @@ import (
 )
 
 func runTUI() error {
-	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
+	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 	sessions, err := builder.Build()
 	if err != nil {
 		return fmt.Errorf("build index: %w", err)
@@ -44,7 +44,7 @@ func runTUI() error {
 				os.Exit(1)
 			}
 
-			locator := session.NewLocator(cfg.ClaudeDir, cfg.BackupDir)
+			locator := session.NewLocator(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 			loc := locator.Locate(target.ID, target.ProjectDir)
 			if loc.ActivePath == "" && loc.ArchivedPath == "" {
 				fmt.Fprintf(os.Stderr, "Cannot resume: session file was deleted before backup. Only history metadata remains.\n")

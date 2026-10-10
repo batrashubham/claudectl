@@ -37,7 +37,7 @@ func TestBuild_CorrectSessionCount(t *testing.T) {
 	}
 	writeHistoryJSONL(t, filepath.Join(claudeDir, "history.jsonl"), entries)
 
-	builder := NewBuilder(claudeDir, backupDir)
+	builder := NewBuilder(claudeDir, backupDir, "this")
 	sessions, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -62,7 +62,7 @@ func TestBuild_FirstPromptLastPrompt(t *testing.T) {
 	}
 	writeHistoryJSONL(t, filepath.Join(claudeDir, "history.jsonl"), entries)
 
-	builder := NewBuilder(claudeDir, backupDir)
+	builder := NewBuilder(claudeDir, backupDir, "this")
 	sessions, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -96,7 +96,7 @@ func TestBuild_PromptCount(t *testing.T) {
 	}
 	writeHistoryJSONL(t, filepath.Join(claudeDir, "history.jsonl"), entries)
 
-	builder := NewBuilder(claudeDir, backupDir)
+	builder := NewBuilder(claudeDir, backupDir, "this")
 	sessions, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -126,7 +126,7 @@ func TestBuild_CommandsExcludedFromPrompts(t *testing.T) {
 	}
 	writeHistoryJSONL(t, filepath.Join(claudeDir, "history.jsonl"), entries)
 
-	builder := NewBuilder(claudeDir, backupDir)
+	builder := NewBuilder(claudeDir, backupDir, "this")
 	sessions, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -163,7 +163,7 @@ func TestBuild_Deduplication(t *testing.T) {
 	writeHistoryJSONL(t, filepath.Join(claudeDir, "history.jsonl"), entries)
 	writeHistoryJSONL(t, filepath.Join(backupDir, "history.jsonl"), entries)
 
-	builder := NewBuilder(claudeDir, backupDir)
+	builder := NewBuilder(claudeDir, backupDir, "this")
 	sessions, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -210,11 +210,80 @@ func TestBuild_HistoryLineOverOneMBDoesNotEndScan(t *testing.T) {
 		{Display: "after", Timestamp: 2000, Project: "/proj/a", SessionID: "session-after"},
 	})
 
-	sessions, err := NewBuilder(claudeDir, filepath.Join(tmpDir, "backup")).Build()
+	sessions, err := NewBuilder(claudeDir, filepath.Join(tmpDir, "backup"), "this").Build()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sessions) != 2 {
 		t.Errorf("expected 2 sessions, got %d", len(sessions))
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	os.MkdirAll(filepath.Dir(path), 0755)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func byID(sessions []SessionMeta) map[string]SessionMeta {
+	m := make(map[string]SessionMeta)
+	for _, s := range sessions {
+		m[s.ID] = s
+	}
+	return m
+}
+
+func TestBuild_LabelsSessionsByMachine(t *testing.T) {
+	tmp := t.TempDir()
+	claudeDir, backupDir := filepath.Join(tmp, "claude"), filepath.Join(tmp, "backup")
+	writeFile(t, filepath.Join(claudeDir, "projects", "-p", "live.jsonl"), "{}\n")
+	writeFile(t, filepath.Join(backupDir, "machines", "work", "projects", "-p", "mine.jsonl"), "{}\n")
+	writeFile(t, filepath.Join(backupDir, "projects", "-p", "legacy.jsonl"), "{}\n")
+	writeFile(t, filepath.Join(backupDir, "machines", "home", "projects", "-p", "theirs.jsonl"), "{}\n")
+	writeFile(t, filepath.Join(backupDir, "machines", "home", "projects", "-p", "both.jsonl"), "{}\n")
+	writeFile(t, filepath.Join(backupDir, "machines", "work", "projects", "-p", "both.jsonl"), "{}\n")
+	writeHistoryJSONL(t, filepath.Join(backupDir, "machines", "home", "history.jsonl"), []HistoryEntry{
+		{Display: "only on home", Timestamp: 1000, Project: "/p", SessionID: "ghost"},
+	})
+
+	sessions, err := NewBuilder(claudeDir, backupDir, "work").Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byID(sessions)
+	want := map[string]string{"live": "work", "mine": "work", "legacy": "work", "theirs": "home", "both": "work", "ghost": "home"}
+	for id, m := range want {
+		if got[id].Machine != m {
+			t.Errorf("%s: machine = %q, want %q", id, got[id].Machine, m)
+		}
+	}
+	if got["live"].Status != StatusActive || got["theirs"].Status != StatusArchived {
+		t.Error("wrong status")
+	}
+}
+
+func TestBuild_ProjectFromTranscriptCwdWhenNoHistory(t *testing.T) {
+	tmp := t.TempDir()
+	claudeDir := filepath.Join(tmp, "claude")
+	writeFile(t, filepath.Join(claudeDir, "projects", "-code-my-app", "s.jsonl"),
+		`{"type":"permission-mode"}`+"\n"+`{"type":"user","cwd":"/code/my-app"}`+"\n")
+
+	sessions, _ := NewBuilder(claudeDir, filepath.Join(tmp, "backup"), "work").Build()
+	if sessions[0].Project != "/code/my-app" {
+		t.Errorf("project = %q, want /code/my-app (folder decoding gives /code/my/app)", sessions[0].Project)
+	}
+}
+
+func TestMachines(t *testing.T) {
+	backupDir := t.TempDir()
+	for _, m := range []string{"work", "home"} {
+		os.MkdirAll(filepath.Join(backupDir, "machines", m), 0755)
+	}
+	os.MkdirAll(filepath.Join(backupDir, "machines", ".tmp"), 0755)
+	got := Machines(backupDir)
+	if len(got) != 2 || got[0] != "home" || got[1] != "work" {
+		t.Errorf("got %v", got)
 	}
 }

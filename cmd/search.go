@@ -16,6 +16,7 @@ import (
 var (
 	searchLimit int
 	searchJSON  bool
+	searchAll   bool
 )
 
 var searchCmd = &cobra.Command{
@@ -28,9 +29,12 @@ All words must match, in any order. Quote a phrase to match it exactly:
   claudectl search '"consumer group" rebalance'`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sessions, err := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir).Build()
+		sessions, err := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).Build()
 		if err != nil {
 			return err
+		}
+		if !searchAll {
+			sessions = index.ForMachine(sessions, cfg.MachineName)
 		}
 		idx, err := search.BuildForSessions(cfg, sessions)
 		if err != nil {
@@ -51,6 +55,7 @@ All words must match, in any order. Quote a phrase to match it exactly:
 			type result struct {
 				ID       string  `json:"id"`
 				Project  string  `json:"project"`
+				Machine  string  `json:"machine"`
 				LastSeen string  `json:"lastSeen"`
 				Score    float64 `json:"score"`
 				Snippet  string  `json:"snippet"`
@@ -58,7 +63,7 @@ All words must match, in any order. Quote a phrase to match it exactly:
 			out := make([]result, 0, len(hits))
 			for _, h := range hits {
 				s := byID[h.ID]
-				out = append(out, result{h.ID, s.Project, s.LastSeen.Format("2006-01-02T15:04:05Z07:00"), h.Score, h.Snippet})
+				out = append(out, result{h.ID, s.Project, s.Machine, s.LastSeen.Format("2006-01-02T15:04:05Z07:00"), h.Score, h.Snippet})
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -71,7 +76,11 @@ All words must match, in any order. Quote a phrase to match it exactly:
 		}
 		for _, h := range hits {
 			s := byID[h.ID]
-			fmt.Printf("%s  %s  %s\n", h.ID, filepath.Base(s.Project), humanize.Time(s.LastSeen))
+			where := filepath.Base(s.Project)
+			if searchAll {
+				where = s.Machine + ":" + where
+			}
+			fmt.Printf("%s  %s  %s\n", h.ID, where, humanize.Time(s.LastSeen))
 			if h.Snippet != "" {
 				fmt.Printf("    %s\n", h.Snippet)
 			}
@@ -83,5 +92,6 @@ All words must match, in any order. Quote a phrase to match it exactly:
 func init() {
 	searchCmd.Flags().IntVarP(&searchLimit, "limit", "n", 20, "max results (0 for all)")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "output as JSON")
+	searchCmd.Flags().BoolVarP(&searchAll, "all", "a", false, "search sessions from all machines")
 	rootCmd.AddCommand(searchCmd)
 }

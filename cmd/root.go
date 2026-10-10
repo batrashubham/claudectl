@@ -19,6 +19,13 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
+		// Pin the machine name so a hostname change can't split this
+		// machine's backup into two folders.
+		if cfg.MachineNameDefaulted && !needsSetup() {
+			if err := config.Save(cfg); err == nil {
+				cfg.MachineNameDefaulted = false
+			}
+		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {

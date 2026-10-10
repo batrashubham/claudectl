@@ -45,7 +45,7 @@ var templateSaveCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir)
+		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
 		sessions, err := builder.Build()
 		if err != nil {
 			return err
