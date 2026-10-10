@@ -274,8 +274,9 @@ func TestSave_Trim_NewerEntryTypes(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	trimmed := []string{"progress", "mode", "ai-title", "frame-link", "file-history-delta"}
-	kept := []string{"system", "pr-link", "agent-setting"}
+	trimmed := []string{"progress", "mode", "ai-title", "frame-link", "file-history-delta",
+		"agent-color", "atis-latch", "cost-state", "artifact-autoreact-ledger", "artifact-comment-monitor", "bridge-session"}
+	kept := []string{"system", "pr-link", "agent-setting", "relocated", "worktree-state"}
 
 	var lines []string
 	lines = append(lines, `{"type":"permission-mode","sessionId":"`+testSessionID+`"}`)

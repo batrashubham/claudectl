@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -88,7 +89,7 @@ func (b *Builder) parseHistoryFile(path string, sessions map[string]*SessionMeta
 			s = &SessionMeta{
 				ID:         entry.SessionID,
 				Project:    entry.Project,
-				ProjectDir: projectToDir(entry.Project),
+				ProjectDir: ProjectDir(entry.Project),
 			}
 			sessions[entry.SessionID] = s
 		}
@@ -184,8 +185,12 @@ func (b *Builder) resolveStatus(s *SessionMeta) {
 	}
 }
 
-func projectToDir(project string) string {
-	return strings.ReplaceAll(project, "/", "-")
+var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// ProjectDir encodes a project path the way Claude Code names its
+// ~/.claude/projects/ folders: every non-alphanumeric character becomes "-".
+func ProjectDir(project string) string {
+	return nonAlnum.ReplaceAllString(project, "-")
 }
 
 func dirToProject(dir string) string {

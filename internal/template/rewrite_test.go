@@ -120,3 +120,15 @@ func TestRewriteSessionID_LinesWithoutIDPassThrough(t *testing.T) {
 		t.Errorf("line with ID was not rewritten: %q", lines[1])
 	}
 }
+
+func TestRewriteSessionID_HandlesLinesOverOneMB(t *testing.T) {
+	big := `{"sessionId":"old","blob":"` + strings.Repeat("x", 3<<20) + `"}`
+	var out strings.Builder
+	n, err := RewriteSessionID(strings.NewReader(big+"\n"), &out, "old", "new")
+	if err != nil {
+		t.Fatalf("rewrite failed on a 3 MB line: %v", err)
+	}
+	if n != 1 || !strings.Contains(out.String(), `"sessionId":"new"`) {
+		t.Errorf("line not rewritten (n=%d)", n)
+	}
+}

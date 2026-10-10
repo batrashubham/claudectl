@@ -361,7 +361,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if tmpl := m.selectedTemplate(); tmpl != "" {
 				store := template.NewStore(m.config.TemplatesDir, m.config.ClaudeDir)
 				cwd, _ := os.Getwd()
-				projectDir := strings.ReplaceAll(cwd, "/", "-")
+				projectDir := index.ProjectDir(cwd)
 				store.Delete(projectDir, tmpl)
 				// Rebuild sidebar
 				m.templates, _ = store.ListAll()

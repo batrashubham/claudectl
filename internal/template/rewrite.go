@@ -8,7 +8,7 @@ import (
 
 func RewriteSessionID(reader io.Reader, writer io.Writer, oldID, newID string) (int, error) {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), maxLine)
 	bw := bufio.NewWriter(writer)
 
 	lineCount := 0

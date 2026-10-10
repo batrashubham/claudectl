@@ -18,17 +18,24 @@ import (
 //   - system: mixed subtypes, some carry real state
 //   - pr-link: `claude --from-pr` resolves sessions through it
 //   - agent-setting: determines which agent restores on resume
+//   - relocated, worktree-state: decide which directory the session resumes in
 var trimTypes = map[string]bool{
-	"last-prompt":           true,
-	"custom-title":          true,
-	"agent-name":            true,
-	"queue-operation":       true,
-	"file-history-snapshot": true,
-	"file-history-delta":    true, // pairs with file-history-snapshot
-	"progress":              true, // hook progress logs
-	"mode":                  true, // UI mode (normal/plan)
-	"ai-title":              true, // cosmetic generated title
-	"frame-link":            true, // scratchpad artifact links
+	"last-prompt":               true,
+	"custom-title":              true,
+	"agent-name":                true,
+	"queue-operation":           true,
+	"file-history-snapshot":     true,
+	"file-history-delta":        true, // pairs with file-history-snapshot
+	"progress":                  true, // hook progress logs
+	"mode":                      true, // UI mode (normal/plan)
+	"ai-title":                  true, // cosmetic generated title
+	"frame-link":                true, // scratchpad artifact links
+	"agent-color":               true, // cosmetic
+	"atis-latch":                true, // UI state
+	"cost-state":                true, // stats from the original run
+	"artifact-autoreact-ledger": true, // artifact bookkeeping
+	"artifact-comment-monitor":  true, // artifact bookkeeping
+	"bridge-session":            true, // remote-control link to the original session
 }
 
 type SaveOptions struct {
@@ -123,7 +130,7 @@ func (s *Store) copySession(src, dst string, trim bool) (entryCount int, sizeByt
 
 	bw := bufio.NewWriter(out)
 	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), maxLine)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -199,4 +206,3 @@ func copyFile(src, dst string) error {
 	_, err = io.Copy(out, in)
 	return err
 }
-

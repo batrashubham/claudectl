@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"text/tabwriter"
 
@@ -317,5 +316,5 @@ func currentProjectDir() string {
 	if err != nil {
 		return ""
 	}
-	return strings.ReplaceAll(cwd, "/", "-")
+	return index.ProjectDir(cwd)
 }

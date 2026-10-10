@@ -178,3 +178,20 @@ func TestBuild_Deduplication(t *testing.T) {
 		t.Errorf("expected PromptCount=2 (deduplicated), got %d", sessions[0].PromptCount)
 	}
 }
+
+// Claude Code replaces every non-alphanumeric character, not just "/".
+// Verified empirically: "/…/T/cc.enc_test v2" → "-…-T-cc-enc-test-v2".
+func TestProjectDir_MatchesClaudeEncoding(t *testing.T) {
+	cases := map[string]string{
+		"/Users/me/code/app":        "-Users-me-code-app",
+		"/Users/me/code/my.app":     "-Users-me-code-my-app",
+		"/Users/me/code/my_app":     "-Users-me-code-my-app",
+		"/Users/me/My Projects/app": "-Users-me-My-Projects-app",
+		"/tmp/cc.enc_test v2":       "-tmp-cc-enc-test-v2",
+	}
+	for in, want := range cases {
+		if got := ProjectDir(in); got != want {
+			t.Errorf("ProjectDir(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

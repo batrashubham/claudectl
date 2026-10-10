@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -61,7 +62,7 @@ session UUID so it doesn't conflict with the original.`,
 		newID := uuid.New().String()
 
 		// Encode project path to directory name
-		projectDir := strings.ReplaceAll(importProject, "/", "-")
+		projectDir := index.ProjectDir(importProject)
 
 		// Create destination directory
 		destDir := filepath.Join(cfg.ClaudeDir, "projects", projectDir)

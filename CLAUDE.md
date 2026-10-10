@@ -60,11 +60,15 @@ GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
 - Internal packages not exported
 - Error messages: lowercase, no punctuation, include context
 
-## Session-format notes (verified against Claude Code 2.1.220)
+## Session-format notes (verified against Claude Code 2.1.290)
 
 - `--trim` is a *remove-list*: unknown entry types are always kept, so new
   Claude Code entry types are safe by default. Re-audit the list when Claude
   Code adds types; see `internal/template/save.go` for what is deliberately kept.
+- Project folders: Claude Code replaces every non-alphanumeric character in the
+  path with `-` (not just `/`). Always use `index.ProjectDir`.
+- Single JSONL lines can exceed 5 MB (large tool results) — never use the default
+  1 MB `bufio.Scanner` limit when reading session files.
 - Background sessions (`claude --bg`) store transcripts in the normal
   `~/.claude/projects/` tree, so the filesystem walk already covers them.
 - **Fork lineage is not recoverable.** `--fork-session` rewrites every UUID and

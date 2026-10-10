@@ -82,3 +82,7 @@ func (s *Store) Exists(projectDir, name string) bool {
 	_, err := os.Stat(s.metaPath(projectDir, name))
 	return err == nil
 }
+
+// maxLine bounds a single JSONL entry. Tool results can exceed 5 MB, so the
+// default 1 MB scanner limit is not enough.
+const maxLine = 256 << 20
