@@ -6,11 +6,11 @@ import (
 	"os/exec"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/batrashubham/claudectl/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func runTUI() error {

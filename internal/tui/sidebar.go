@@ -9,12 +9,12 @@ import (
 )
 
 type sidebarItem struct {
-	label     string
-	project   string // full project path, empty for "All"
-	isAll     bool
-	isTmpl    bool
-	tmplName  string
-	count     int
+	label    string
+	project  string // full project path, empty for "All"
+	isAll    bool
+	isTmpl   bool
+	tmplName string
+	count    int
 }
 
 type paneFocus int

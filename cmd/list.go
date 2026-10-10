@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/dustin/go-humanize"
 	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 

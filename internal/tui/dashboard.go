@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/template"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dustin/go-humanize"
-	"github.com/batrashubham/claudectl/internal/index"
-	"github.com/batrashubham/claudectl/internal/template"
 )
 
 func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

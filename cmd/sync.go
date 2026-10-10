@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/batrashubham/claudectl/internal/sync"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 

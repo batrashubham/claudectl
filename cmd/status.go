@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 

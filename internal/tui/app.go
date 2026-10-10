@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/dustin/go-humanize"
 	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/search"
 	"github.com/batrashubham/claudectl/internal/sync"
 	"github.com/batrashubham/claudectl/internal/template"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/dustin/go-humanize"
 )
 
 type viewState int
@@ -135,15 +135,15 @@ type syncDoneMsg struct {
 }
 
 type Model struct {
-	state      viewState
-	focus      paneFocus
-	sessions   []index.SessionMeta
-	filtered   []index.SessionMeta
-	templates  []template.Meta
-	cursor     int
-	offset     int
-	search     textinput.Model
-	filter     filterMode
+	state     viewState
+	focus     paneFocus
+	sessions  []index.SessionMeta
+	filtered  []index.SessionMeta
+	templates []template.Meta
+	cursor    int
+	offset    int
+	search    textinput.Model
+	filter    filterMode
 
 	// Sidebar
 	sidebarItems  []sidebarItem
@@ -158,8 +158,8 @@ type Model struct {
 	syncResult string
 	err        error
 
-	searchIdx *search.Index
-	snippets  map[string]string
+	searchIdx   *search.Index
+	snippets    map[string]string
 	resumeID    string
 	spawnTmpl   string
 	rewarmTmpl  string

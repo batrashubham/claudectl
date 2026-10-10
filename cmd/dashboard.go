@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/dustin/go-humanize"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/template"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 
