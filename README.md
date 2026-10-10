@@ -60,6 +60,8 @@ claudectl sync           # One-shot sync
 claudectl sync --watch   # Continuous sync (every 5m, configurable)
 claudectl list           # Plain text session list
 claudectl list --json    # JSON output for scripting
+claudectl search kafka timeout   # Full-text search (all words must match)
+claudectl search '"consumer group"' --json   # Exact phrase, JSON output
 claudectl resume <id>    # Resume a session directly by ID
 claudectl restore        # Pull latest backup from git remote
 claudectl export <id>    # Export session as readable markdown
@@ -123,7 +125,7 @@ TEMPLATES            │    ○ api-service                          3w
 | `r` | Resume session (restores from backup if needed) |
 | `t` | Save current session as a template |
 | `d` | Delete template (when focused in sidebar) |
-| `/` | Full-text search across all prompts |
+| `/` | Full-text search across transcripts (all words, any order; `"quote"` for phrases) |
 | `f` | Cycle filter: All → Active → Archive → Ghost |
 | `s` | Sync now |
 | `g/G` | Jump to top/bottom |
@@ -302,6 +304,12 @@ Sessions are indexed by merging two sources:
 
 Both the live and backup copies of `history.jsonl` are merged and deduplicated, so even if Claude cleans the live file, your backup preserves all metadata.
 
+### Search
+
+Search covers what you typed (including pasted text), Claude's replies, commands it ran, files it touched, and tool errors. Successful tool output (file contents, command output) is skipped as noise.
+
+Each transcript's searchable text is cached in `~/.claudectl/cache/search/` and re-extracted only when the file grows, so only the first search is slow. Results rank by how often the terms appear, with a boost for recent sessions, and show a snippet of the matching text. In the TUI the index loads in the background; until then, search falls back to your prompts only.
+
 ### Resume
 
 When you resume an archived session:
@@ -314,6 +322,7 @@ When you resume an archived session:
 ```
 ~/.claudectl/
 ├── config.toml
+├── cache/search/             # extracted search text (local, not backed up)
 └── backup/                   # git repo (synced + pushed)
     ├── .gitattributes        # merge=union for history.jsonl
     ├── history.jsonl

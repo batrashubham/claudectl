@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/search"
 	"github.com/batrashubham/claudectl/internal/sync"
 	"github.com/batrashubham/claudectl/internal/template"
 )
@@ -123,6 +125,10 @@ func (f filterMode) countFiltered(sessions []index.SessionMeta, projectFilter st
 	return c
 }
 
+type searchIndexMsg struct {
+	idx *search.Index
+}
+
 type syncDoneMsg struct {
 	result *sync.Result
 	err    error
@@ -151,6 +157,9 @@ type Model struct {
 	lastSync   time.Time
 	syncResult string
 	err        error
+
+	searchIdx *search.Index
+	snippets  map[string]string
 	resumeID    string
 	spawnTmpl   string
 	rewarmTmpl  string
@@ -194,9 +203,20 @@ func (m Model) RewarmTemplate() string {
 
 func (m Model) Init() tea.Cmd {
 	if m.config.SyncOnStart {
-		return m.doSync()
+		return tea.Batch(m.doSync(), m.buildSearchIndex())
 	}
-	return nil
+	return m.buildSearchIndex()
+}
+
+func (m Model) buildSearchIndex() tea.Cmd {
+	cfg, sessions := m.config, m.sessions
+	return func() tea.Msg {
+		idx, err := search.BuildForSessions(cfg, sessions)
+		if err != nil {
+			return nil
+		}
+		return searchIndexMsg{idx: idx}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -204,6 +224,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+
+	case searchIndexMsg:
+		m.searchIdx = msg.idx
+		m.applyFilter()
 		return m, nil
 
 	case syncDoneMsg:
@@ -217,6 +242,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if sessions, err := builder.Build(); err == nil {
 				m.sessions = sessions
 				m.applyFilter()
+				return m, m.buildSearchIndex()
 			}
 		}
 		return m, nil
@@ -482,9 +508,22 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) applyFilter() {
-	query := strings.ToLower(m.search.Value())
+	query := m.search.Value()
+	terms := search.Terms(query)
 	projectFilter := m.sidebarProjectFilter()
 	m.filtered = nil
+	m.snippets = nil
+
+	var rank map[string]int
+	if len(terms) > 0 && m.searchIdx != nil {
+		hits := m.searchIdx.Search(query)
+		rank = make(map[string]int, len(hits))
+		m.snippets = make(map[string]string, len(hits))
+		for i, h := range hits {
+			rank[h.ID] = i
+			m.snippets[h.ID] = h.Snippet
+		}
+	}
 
 	for _, s := range m.sessions {
 		// Sidebar project filter
@@ -518,16 +557,31 @@ func (m *Model) applyFilter() {
 			}
 		}
 
-		// Search
-		if query != "" {
-			searchable := s.SearchText + strings.ToLower(s.Project) + " " + s.ID
-			if !strings.Contains(searchable, query) {
+		if rank != nil {
+			if _, ok := rank[s.ID]; !ok {
 				continue
 			}
+		} else if len(terms) > 0 && !matchesPrompts(s, terms) {
+			continue
 		}
 
 		m.filtered = append(m.filtered, s)
 	}
+
+	if rank != nil {
+		sort.SliceStable(m.filtered, func(i, j int) bool { return rank[m.filtered[i].ID] < rank[m.filtered[j].ID] })
+	}
+}
+
+// matchesPrompts is the search used until the full-text index has loaded.
+func matchesPrompts(s index.SessionMeta, terms []string) bool {
+	searchable := s.SearchText + strings.ToLower(s.Project) + " " + s.ID
+	for _, t := range terms {
+		if !strings.Contains(searchable, t) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Model) ensureVisible() {
@@ -902,12 +956,15 @@ func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) strin
 
 	// Preview
 	preview := s.FirstPrompt
+	if snip := m.snippets[s.ID]; snip != "" {
+		preview = snip
+	}
 	if preview == "" {
 		preview = s.ID[:12] + "..."
 	}
 	maxPrev := contentWidth - 2
-	if len(preview) > maxPrev {
-		preview = preview[:maxPrev-3] + "..."
+	if r := []rune(preview); len(r) > maxPrev {
+		preview = string(r[:maxPrev-3]) + "..."
 	}
 	line2 := "     " + lipgloss.NewStyle().Foreground(prevFg).Render(preview)
 
