@@ -11,6 +11,7 @@ import (
 	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/index"
 	"github.com/batrashubham/claudectl/internal/search"
+	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/sync"
 	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -495,6 +496,7 @@ func (m Model) updateNaming(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Description: fmt.Sprintf("Warm context from %s", filepath.Base(target.Project)),
 			Trim:        true,
 			Force:       true,
+			SourcePath:  session.NewLocator(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName).Path(target.ID, target.ProjectDir),
 		})
 		if err != nil {
 			m.syncResult = fmt.Sprintf("save failed: %v", err)

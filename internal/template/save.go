@@ -47,6 +47,9 @@ type SaveOptions struct {
 	RewarmPrompt string
 	Trim         bool
 	Force        bool
+	// SourcePath is the session file to save; defaults to the live copy in
+	// the Claude dir. Set it to save an archived or other-machine session.
+	SourcePath string
 }
 
 func (s *Store) Save(opts SaveOptions) error {
@@ -59,7 +62,10 @@ func (s *Store) Save(opts SaveOptions) error {
 	}
 
 	// Find the session file
-	sessionFile := filepath.Join(s.claudeDir, "projects", opts.ProjectDir, opts.SessionID+".jsonl")
+	sessionFile := opts.SourcePath
+	if sessionFile == "" {
+		sessionFile = filepath.Join(s.claudeDir, "projects", opts.ProjectDir, opts.SessionID+".jsonl")
+	}
 	if _, err := os.Stat(sessionFile); os.IsNotExist(err) {
 		return fmt.Errorf("session file not found: %s", sessionFile)
 	}

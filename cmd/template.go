@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/template"
 	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
@@ -72,6 +73,7 @@ var templateSaveCmd = &cobra.Command{
 			RewarmPrompt: saveRewarmPrompt,
 			Trim:         saveTrim,
 			Force:        saveForce,
+			SourcePath:   session.NewLocator(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).Path(target.ID, target.ProjectDir),
 		})
 		if err != nil {
 			return err

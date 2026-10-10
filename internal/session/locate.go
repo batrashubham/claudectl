@@ -57,3 +57,12 @@ func (l *Locator) Locate(sessionID, projectDir string) Location {
 
 	return loc
 }
+
+// Path returns the best copy of a session file: live first, then backup.
+func (l *Locator) Path(sessionID, projectDir string) string {
+	loc := l.Locate(sessionID, projectDir)
+	if loc.ActivePath != "" {
+		return loc.ActivePath
+	}
+	return loc.ArchivedPath
+}

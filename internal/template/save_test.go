@@ -419,3 +419,22 @@ func TestSave_WithoutForce_ErrorsOnExisting(t *testing.T) {
 		t.Errorf("expected error to mention --force, got: %v", err)
 	}
 }
+
+func TestSave_FromSourcePathOutsideClaudeDir(t *testing.T) {
+	templatesDir, claudeDir := t.TempDir(), t.TempDir()
+	archived := filepath.Join(t.TempDir(), "machines", "home", "projects", testProjectDir)
+	os.MkdirAll(filepath.Join(archived, testSessionID, "subagents"), 0755)
+	src := filepath.Join(archived, testSessionID+".jsonl")
+	os.WriteFile(src, []byte(sampleJSONL()), 0644)
+	os.WriteFile(filepath.Join(archived, testSessionID, "subagents", "a.jsonl"), []byte("{}\n"), 0644)
+
+	store := NewStore(templatesDir, claudeDir)
+	err := store.Save(SaveOptions{SessionID: testSessionID, ProjectDir: testProjectDir, Project: "p", Name: "from-backup", SourcePath: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := store.ReadMeta(testProjectDir, "from-backup")
+	if err != nil || meta.EntryCount != 6 || !meta.HasSubagents {
+		t.Errorf("meta %+v err %v", meta, err)
+	}
+}
