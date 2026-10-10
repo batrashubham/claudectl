@@ -338,3 +338,11 @@ func ForMachine(sessions []SessionMeta, machine string) []SessionMeta {
 	}
 	return out
 }
+
+// ShortID returns at most the first n characters of a session ID.
+func ShortID(id string, n int) string {
+	if len(id) <= n {
+		return id
+	}
+	return id[:n]
+}

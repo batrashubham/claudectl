@@ -41,3 +41,14 @@ func TestMachineToggle(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderShortIDWithoutPrompt(t *testing.T) {
+	cfg := &config.Config{BackupDir: t.TempDir(), ClaudeDir: t.TempDir(), MachineName: "home"}
+	var model tea.Model = NewModel(cfg, []index.SessionMeta{{ID: "abc", Machine: "home", FileSize: 1, LastSeen: time.Now()}})
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	if !strings.Contains(model.View(), "abc...") {
+		t.Error("short ID not rendered")
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model.View()
+}

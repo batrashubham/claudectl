@@ -993,7 +993,7 @@ func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) strin
 		preview = snip
 	}
 	if preview == "" {
-		preview = s.ID[:12] + "..."
+		preview = index.ShortID(s.ID, 12) + "..."
 	}
 	maxPrev := contentWidth - 2
 	if r := []rune(preview); len(r) > maxPrev {
@@ -1105,7 +1105,7 @@ func (m Model) viewDetail() string {
 	val := func(v string) string { return lipgloss.NewStyle().Foreground(text).Render(v) }
 
 	left.WriteString(lbl("Status") + statusDot + " " + val(statusText) + "\n")
-	left.WriteString(lbl("Session") + val(s.ID[:16]+"…") + "\n")
+	left.WriteString(lbl("Session") + val(index.ShortID(s.ID, 16)+"…") + "\n")
 	left.WriteString(lbl("Started") + val(s.FirstSeen.Format("Jan 2 15:04")) + "\n")
 	left.WriteString(lbl("Last") + val(s.LastSeen.Format("Jan 2 15:04")+" ("+shortAge(s.LastSeen)+" ago)") + "\n")
 	if s.FileSize > 0 {

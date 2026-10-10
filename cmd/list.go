@@ -54,7 +54,7 @@ var listCmd = &cobra.Command{
 
 			preview := s.FirstPrompt
 			if preview == "" {
-				preview = s.ID[:8] + "..."
+				preview = index.ShortID(s.ID, 8) + "..."
 			}
 			if len(preview) > 50 {
 				preview = preview[:47] + "..."

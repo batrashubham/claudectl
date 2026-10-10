@@ -287,3 +287,9 @@ func TestMachines(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestShortID(t *testing.T) {
+	if ShortID("abc", 8) != "abc" || ShortID("0123456789", 4) != "0123" {
+		t.Error("ShortID")
+	}
+}

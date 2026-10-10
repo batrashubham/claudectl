@@ -77,7 +77,7 @@ var templateSaveCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("✓ Template '%s' saved from session %s\n", saveName, sessionID[:12])
+		fmt.Printf("✓ Template '%s' saved from session %s\n", saveName, index.ShortID(sessionID, 12))
 		if saveTrim {
 			fmt.Println("  (trimmed non-essential entries)")
 		}
