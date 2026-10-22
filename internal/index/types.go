@@ -1,6 +1,10 @@
 package index
 
-import "time"
+import (
+	"time"
+
+	"github.com/batrashubham/claudectl/internal/meta"
+)
 
 type SessionStatus int
 
@@ -40,6 +44,8 @@ type SessionMeta struct {
 	FileSize    int64
 	SearchText  string // All prompts concatenated (lowercase) for full-text search
 	Machine     string // Machine the session belongs to; this machine if it exists here
+	Path        string // Best transcript copy: live, else this machine's backup, else another's
+	Info        meta.Info
 
 	// Used during index building
 	activeExists    bool

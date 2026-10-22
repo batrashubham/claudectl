@@ -21,7 +21,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all sessions (active and archived)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
+		builder := newBuilder()
 		sessions, err := builder.Build()
 		if err != nil {
 			return err
@@ -52,7 +52,7 @@ var listCmd = &cobra.Command{
 				project = s.ProjectDir
 			}
 
-			preview := s.FirstPrompt
+			preview := s.Label()
 			if preview == "" {
 				preview = index.ShortID(s.ID, 8) + "..."
 			}

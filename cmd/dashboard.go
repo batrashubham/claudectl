@@ -52,7 +52,7 @@ var (
 )
 
 func runDashboard() error {
-	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
+	builder := newBuilder()
 	sessions, err := builder.Build()
 	if err != nil {
 		return fmt.Errorf("building session index: %w", err)

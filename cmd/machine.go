@@ -17,7 +17,7 @@ var machineCmd = &cobra.Command{
 	Use:   "machine",
 	Short: "List machines in the backup",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sessions, err := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).Build()
+		sessions, err := newBuilder().Build()
 		if err != nil {
 			return err
 		}

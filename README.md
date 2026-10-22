@@ -123,6 +123,10 @@ TEMPLATES            │    ○ api-service                          3w
 | `○` | Archived — only in backup (resumable) |
 | `△` | Ghost — only in history, not resumable (hidden by default) |
 
+Sessions show their name — the one you set with `/rename`, else the title Claude generated — falling back to the first prompt. Rows also show the git branch (`⎇`) and linked PRs (`⇡`); the detail view adds model, Claude Code version, worktree, agent and the PR list. Names, branches and PRs are searchable.
+
+This metadata is cached in `~/.claudectl/cache/meta/`; since transcripts only grow, each run reads just what was appended.
+
 ### Key bindings
 
 | Key | Action |

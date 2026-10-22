@@ -15,7 +15,7 @@ var resumeCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID := args[0]
 
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
+		builder := newBuilder()
 		sessions, err := builder.Build()
 		if err != nil {
 			return err

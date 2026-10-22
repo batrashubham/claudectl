@@ -22,6 +22,8 @@ internal/
   config/         # TOML config at ~/.claudectl/config.toml
   index/          # Session index: merges history.jsonl + filesystem walk, across machines
   search/         # Full-text transcript search with a size-keyed local cache
+  meta/           # Transcript metadata (titles, branch, model, PRs) with an offset-keyed cache
+  update/         # Version resolution and self-update from GitHub releases
   session/        # Locate, restore, resume (syscall.Exec)
   sync/           # Append-only copy engine + git commit/push + lockfile
   template/       # Save/spawn/list/delete session templates
@@ -79,5 +81,10 @@ GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
   session. Content-prefix matching was evaluated as a proxy and rejected: on
   real data it produced only false positives (shared `<local-command-caveat>`
   boilerplate and repeated opening prompts).
+- Session names: `/rename` writes `custom-title`, Claude writes `ai-title`; both
+  are re-appended near the end of the file. Top-level `gitBranch`/`version` come
+  *after* the message body on a line (which can contain same-named tool-input
+  keys), so `internal/meta` takes their last match. `cost-state` is all zeros
+  under enterprise billing, so cost isn't shown.
 - `SessionEnd` hooks share a 1.5s budget and do not block exit — anything slow
   must set `async: true` or it gets killed mid-operation.

@@ -14,8 +14,11 @@ import (
 
 // Doc is one searchable session.
 type Doc struct {
-	ID       string
-	Project  string
+	ID      string
+	Project string
+	// Meta is extra matchable text that isn't in the transcript body, such as
+	// the session title, branch and PR links.
+	Meta     string
 	LastSeen time.Time
 	// Path is the session transcript; empty for history-only sessions.
 	Path string
@@ -116,7 +119,7 @@ func (idx *Index) Search(q string) []Hit {
 	var hits []Hit
 	now := time.Now()
 	for _, d := range idx.docs {
-		meta := strings.ToLower(d.doc.Project + " " + d.doc.ID)
+		meta := strings.ToLower(d.doc.Project + " " + d.doc.ID + " " + d.doc.Meta)
 		score := 0.0
 		matched := true
 		for _, t := range terms {

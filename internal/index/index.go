@@ -10,12 +10,22 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/batrashubham/claudectl/internal/meta"
 )
 
 type Builder struct {
 	claudeDir string
 	backupDir string
 	machine   string
+	metaCache string
+}
+
+// WithMetaCache caches transcript metadata in dir so later builds only read
+// what was appended.
+func (b *Builder) WithMetaCache(dir string) *Builder {
+	b.metaCache = dir
+	return b
 }
 
 func NewBuilder(claudeDir, backupDir, machine string) *Builder {
@@ -83,6 +93,9 @@ func (b *Builder) Build() ([]SessionMeta, error) {
 	for _, s := range sessions {
 		b.resolveStatus(s)
 		s.Machine = b.resolveMachine(s)
+		if s.Path != "" {
+			s.Info = meta.Read(s.Path, s.ID, b.metaCache)
+		}
 		result = append(result, *s)
 	}
 
@@ -215,6 +228,9 @@ func (b *Builder) scanProjectsDir(sessions map[string]*SessionMeta, src source) 
 				sessions[sessionID] = s
 			}
 			s.addMachine(src.machine)
+			if s.Path == "" {
+				s.Path = filepath.Join(projPath, file.Name())
+			}
 
 			if src.status == StatusActive {
 				s.activeExists = true
@@ -345,4 +361,12 @@ func ShortID(id string, n int) string {
 		return id
 	}
 	return id[:n]
+}
+
+// Label is what to call a session in lists: its title, else its first prompt.
+func (s SessionMeta) Label() string {
+	if t := s.Info.Title(); t != "" {
+		return t
+	}
+	return s.FirstPrompt
 }

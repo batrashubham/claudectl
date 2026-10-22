@@ -47,7 +47,7 @@ directory differs between machines. The copy then gets a new session ID.
 			return fmt.Errorf("nothing to copy: give --to <machine> and/or --project <path>")
 		}
 
-		sessions, err := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).Build()
+		sessions, err := newBuilder().Build()
 		if err != nil {
 			return err
 		}

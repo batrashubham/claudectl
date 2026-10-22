@@ -55,7 +55,7 @@ func runStatus() error {
 	}
 
 	// Sessions count
-	builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
+	builder := newBuilder()
 	sessions, err := builder.Build()
 	if err == nil {
 		var active, archived, ghost int

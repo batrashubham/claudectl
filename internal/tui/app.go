@@ -10,6 +10,7 @@ import (
 
 	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/meta"
 	"github.com/batrashubham/claudectl/internal/search"
 	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/sync"
@@ -259,7 +260,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.syncResult = fmt.Sprintf("%d new, %d updated", msg.result.NewFiles, msg.result.UpdatedFiles)
 			m.lastSync = time.Now()
-			builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName)
+			builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName).WithMetaCache(meta.CacheDir())
 			if sessions, err := builder.Build(); err == nil {
 				m.setSessions(sessions)
 				return m, m.buildSearchIndex()
@@ -602,7 +603,7 @@ func (m *Model) applyFilter() {
 
 // matchesPrompts is the search used until the full-text index has loaded.
 func matchesPrompts(s index.SessionMeta, terms []string) bool {
-	searchable := s.SearchText + strings.ToLower(s.Project) + " " + s.ID
+	searchable := s.SearchText + strings.ToLower(s.Project+" "+s.Info.Title()+" "+s.Info.Branch) + " " + s.ID
 	for _, t := range terms {
 		if !strings.Contains(searchable, t) {
 			return false
@@ -990,9 +991,11 @@ func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) strin
 	line1 := cursor + dot + " " + projRendered + strings.Repeat(" ", gap1) + ageRendered
 
 	// Preview
-	preview := s.FirstPrompt
+	preview := s.Label()
+	titled := s.Info.Title() != ""
 	if snip := m.snippets[s.ID]; snip != "" {
 		preview = snip
+		titled = false
 	}
 	if preview == "" {
 		preview = index.ShortID(s.ID, 12) + "..."
@@ -1001,12 +1004,21 @@ func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) strin
 	if r := []rune(preview); len(r) > maxPrev {
 		preview = string(r[:maxPrev-3]) + "..."
 	}
-	line2 := "     " + lipgloss.NewStyle().Foreground(prevFg).Render(preview)
+	line2 := "     " + lipgloss.NewStyle().Foreground(prevFg).Bold(titled).Render(preview)
 
 	// Meta
 	metaParts := fmt.Sprintf("⊡ %d prompts", s.PromptCount)
 	if s.FileSize > 0 {
 		metaParts += "  ◈ " + humanize.Bytes(uint64(s.FileSize))
+	}
+	if s.Info.Branch != "" {
+		metaParts += "  ⎇ " + truncRunes(s.Info.Branch, 32)
+	}
+	if n := len(s.Info.PRs); n > 0 {
+		metaParts += fmt.Sprintf("  ⇡ %d PR", n)
+		if n > 1 {
+			metaParts += "s"
+		}
 	}
 	if m.allMachines {
 		metaParts += "  ⌂ " + s.Machine
@@ -1086,6 +1098,9 @@ func (m Model) viewDetail() string {
 	var left strings.Builder
 
 	project := filepath.Base(s.Project)
+	if t := s.Info.Title(); t != "" {
+		left.WriteString(lipgloss.NewStyle().Bold(true).Foreground(cyan).Render(truncRunes(t, leftWidth-2)) + "\n")
+	}
 	left.WriteString(lipgloss.NewStyle().Bold(true).Foreground(white).Render(project) + "\n")
 
 	path := s.Project
@@ -1114,6 +1129,24 @@ func (m Model) viewDetail() string {
 		left.WriteString(lbl("Size") + val(humanize.Bytes(uint64(s.FileSize))) + "\n")
 	}
 	left.WriteString(lbl("Prompts") + val(fmt.Sprintf("%d", s.PromptCount)) + "\n")
+	left.WriteString(lbl("Machine") + val(s.Machine) + "\n")
+	for _, f := range []struct{ label, value string }{
+		{"Branch", s.Info.Branch},
+		{"Worktree", s.Info.Worktree},
+		{"Agent", s.Info.Agent},
+		{"Model", s.Info.Model},
+		{"Claude", s.Info.ClaudeVersion},
+	} {
+		if f.value != "" {
+			left.WriteString(lbl(f.label) + val(truncRunes(f.value, leftWidth-12)) + "\n")
+		}
+	}
+	if len(s.Info.PRs) > 0 {
+		left.WriteString("\n" + lipgloss.NewStyle().Foreground(midGray).Render("Pull requests") + "\n")
+		for _, pr := range s.Info.PRs {
+			left.WriteString("  " + val(truncRunes(fmt.Sprintf("%s#%d", filepath.Base(pr.Repo), pr.Number), leftWidth-4)) + "\n")
+		}
+	}
 
 	// === RIGHT: Conversation ===
 	var right strings.Builder
@@ -1190,7 +1223,7 @@ func (m Model) viewDetail() string {
 }
 
 func (m Model) getSessionPrompts(sessionID string) []index.HistoryEntry {
-	builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName)
+	builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName).WithMetaCache(meta.CacheDir())
 	entries, _ := builder.GetSessionEntries(sessionID)
 	return entries
 }
@@ -1227,6 +1260,14 @@ func (m Model) doSync() tea.Cmd {
 
 func (m Model) ResumeID() string {
 	return m.resumeID
+}
+
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n || n < 2 {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func shortAge(t time.Time) string {

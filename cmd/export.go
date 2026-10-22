@@ -20,7 +20,7 @@ var exportCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID := args[0]
 
-		builder := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
+		builder := newBuilder()
 		sessions, err := builder.Build()
 		if err != nil {
 			return err
@@ -68,11 +68,21 @@ func init() {
 
 func writeMarkdown(w io.Writer, meta *index.SessionMeta, entries []index.HistoryEntry) error {
 	// Header
-	fmt.Fprintf(w, "# Session Export\n\n")
+	if t := meta.Info.Title(); t != "" {
+		fmt.Fprintf(w, "# %s\n\n", t)
+	} else {
+		fmt.Fprintf(w, "# Session Export\n\n")
+	}
 	fmt.Fprintf(w, "| Field | Value |\n")
 	fmt.Fprintf(w, "|-------|-------|\n")
 	fmt.Fprintf(w, "| Project | %s |\n", meta.Project)
 	fmt.Fprintf(w, "| Session ID | `%s` |\n", meta.ID)
+	if meta.Info.Branch != "" {
+		fmt.Fprintf(w, "| Branch | `%s` |\n", meta.Info.Branch)
+	}
+	for _, pr := range meta.Info.PRs {
+		fmt.Fprintf(w, "| PR | [%s#%d](%s) |\n", pr.Repo, pr.Number, pr.URL)
+	}
 
 	if len(entries) > 0 {
 		first := time.UnixMilli(entries[0].Timestamp)

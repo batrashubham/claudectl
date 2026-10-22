@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/batrashubham/claudectl/internal/config"
+	"github.com/batrashubham/claudectl/internal/index"
+	"github.com/batrashubham/claudectl/internal/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -40,4 +42,8 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func newBuilder() *index.Builder {
+	return index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).WithMetaCache(meta.CacheDir())
 }

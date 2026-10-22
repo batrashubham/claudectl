@@ -29,7 +29,7 @@ All words must match, in any order. Quote a phrase to match it exactly:
   claudectl search '"consumer group" rebalance'`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sessions, err := index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).Build()
+		sessions, err := newBuilder().Build()
 		if err != nil {
 			return err
 		}
@@ -59,11 +59,12 @@ All words must match, in any order. Quote a phrase to match it exactly:
 				LastSeen string  `json:"lastSeen"`
 				Score    float64 `json:"score"`
 				Snippet  string  `json:"snippet"`
+				Title    string  `json:"title,omitempty"`
 			}
 			out := make([]result, 0, len(hits))
 			for _, h := range hits {
 				s := byID[h.ID]
-				out = append(out, result{h.ID, s.Project, s.Machine, s.LastSeen.Format("2006-01-02T15:04:05Z07:00"), h.Score, h.Snippet})
+				out = append(out, result{h.ID, s.Project, s.Machine, s.LastSeen.Format("2006-01-02T15:04:05Z07:00"), h.Score, h.Snippet, s.Info.Title()})
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -81,6 +82,9 @@ All words must match, in any order. Quote a phrase to match it exactly:
 				where = s.Machine + ":" + where
 			}
 			fmt.Printf("%s  %s  %s\n", h.ID, where, humanize.Time(s.LastSeen))
+			if t := s.Info.Title(); t != "" {
+				fmt.Printf("    ✎ %s\n", t)
+			}
 			if h.Snippet != "" {
 				fmt.Printf("    %s\n", h.Snippet)
 			}

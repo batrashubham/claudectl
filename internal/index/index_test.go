@@ -293,3 +293,16 @@ func TestShortID(t *testing.T) {
 		t.Error("ShortID")
 	}
 }
+
+func TestBuild_AttachesTitleFromBestCopy(t *testing.T) {
+	tmp := t.TempDir()
+	claudeDir, backupDir := filepath.Join(tmp, "claude"), filepath.Join(tmp, "backup")
+	live := filepath.Join(claudeDir, "projects", "-p", "s.jsonl")
+	writeFile(t, live, `{"type":"custom-title","customTitle":"live name"}`+"\n")
+	writeFile(t, filepath.Join(backupDir, "machines", "work", "projects", "-p", "s.jsonl"), `{"type":"custom-title","customTitle":"old"}`+"\n")
+
+	sessions, _ := NewBuilder(claudeDir, backupDir, "work").Build()
+	if sessions[0].Path != live || sessions[0].Label() != "live name" {
+		t.Errorf("path %s label %q", sessions[0].Path, sessions[0].Label())
+	}
+}
