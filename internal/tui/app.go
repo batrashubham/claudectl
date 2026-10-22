@@ -10,7 +10,7 @@ import (
 
 	"github.com/batrashubham/claudectl/internal/config"
 	"github.com/batrashubham/claudectl/internal/index"
-	"github.com/batrashubham/claudectl/internal/meta"
+	"github.com/batrashubham/claudectl/internal/machines"
 	"github.com/batrashubham/claudectl/internal/search"
 	"github.com/batrashubham/claudectl/internal/session"
 	"github.com/batrashubham/claudectl/internal/sync"
@@ -29,6 +29,8 @@ const (
 	searchView
 	dashboardView
 	namingView // naming a new template
+	copyView   // copying a session to a machine
+	renameView // renaming this machine
 )
 
 type filterMode int
@@ -165,7 +167,10 @@ type Model struct {
 
 	allSessions []index.SessionMeta
 	machines    []string
-	allMachines bool
+	// scope is the machine whose sessions are shown; "" shows every machine.
+	scope       string
+	summaries   []machines.Summary
+	copying     copyState
 	resumeID    string
 	spawnTmpl   string
 	rewarmTmpl  string
@@ -190,8 +195,10 @@ func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
 		templates: templates,
 		search:    ti,
 		config:    cfg,
+		scope:     cfg.MachineName,
 	}
 	m.setSessions(sessions)
+	m.selectSidebar("all")
 	return m
 }
 
@@ -199,16 +206,13 @@ func NewModel(cfg *config.Config, sessions []index.SessionMeta) Model {
 // machine unless all machines are shown.
 func (m *Model) setSessions(all []index.SessionMeta) {
 	m.allSessions = all
-	m.machines = index.Machines(m.config.BackupDir)
-	if m.allMachines {
+	m.machines = machines.Names(m.config)
+	if m.scope == "" {
 		m.sessions = all
 	} else {
-		m.sessions = index.ForMachine(all, m.config.MachineName)
+		m.sessions = index.ForMachine(all, m.scope)
 	}
-	m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
-	if m.sidebarCursor >= len(m.sidebarItems) {
-		m.sidebarCursor = max(0, len(m.sidebarItems)-1)
-	}
+	m.rebuildSidebar()
 	m.applyFilter()
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
@@ -225,9 +229,9 @@ func (m Model) RewarmTemplate() string {
 
 func (m Model) Init() tea.Cmd {
 	if m.config.SyncOnStart {
-		return tea.Batch(m.doSync(), m.buildSearchIndex())
+		return tea.Batch(m.doSync(), m.buildSearchIndex(), m.loadSummaries())
 	}
-	return m.buildSearchIndex()
+	return tea.Batch(m.buildSearchIndex(), m.loadSummaries())
 }
 
 func (m Model) buildSearchIndex() tea.Cmd {
@@ -248,6 +252,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case reloadedMsg:
+		m.setSessions(msg)
+		return m, tea.Batch(m.buildSearchIndex(), m.loadSummaries())
+
+	case summariesMsg:
+		m.summaries = msg
+		return m, nil
+
+	case copyDoneMsg:
+		return m.handleCopyDone(msg)
+
+	case renameDoneMsg:
+		return m.handleRenameDone(msg)
+
 	case searchIndexMsg:
 		m.searchIdx = msg.idx
 		m.applyFilter()
@@ -260,10 +278,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.syncResult = fmt.Sprintf("%d new, %d updated", msg.result.NewFiles, msg.result.UpdatedFiles)
 			m.lastSync = time.Now()
-			builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName).WithMetaCache(meta.CacheDir())
+			builder := newBuilder(m.config)
 			if sessions, err := builder.Build(); err == nil {
 				m.setSessions(sessions)
-				return m, m.buildSearchIndex()
+				return m, tea.Batch(m.buildSearchIndex(), m.loadSummaries())
 			}
 		}
 		return m, nil
@@ -274,6 +292,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case namingView:
 			return m.updateNaming(msg)
+		case copyView:
+			return m.updateCopy(msg)
+		case renameView:
+			return m.updateRename(msg)
 		case detailView:
 			return m.updateDetail(msg)
 		case dashboardView:
@@ -342,6 +364,11 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.ensureVisible()
 		}
 	case msg.String() == "enter":
+		if name, ok := m.selectedMachine(); ok && m.focus == focusSidebar {
+			m.setScope(name)
+			m.focus = focusList
+			return m, nil
+		}
 		if m.focus == focusSidebar {
 			// If template selected, spawn it
 			if tmpl := m.selectedTemplate(); tmpl != "" {
@@ -374,11 +401,19 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.doSync()
 		}
 	case msg.String() == "m":
-		m.allMachines = !m.allMachines
-		m.sidebarCursor = 0
-		m.cursor = 0
-		m.offset = 0
-		m.setSessions(m.allSessions)
+		if m.scope == m.config.MachineName {
+			m.setScope("")
+		} else {
+			m.setScope(m.config.MachineName)
+		}
+	case msg.String() == "c":
+		if m.focus == focusList && len(m.filtered) > 0 {
+			return m.startCopy(m.filtered[m.cursor])
+		}
+	case msg.String() == "R":
+		if name, ok := m.selectedMachine(); ok && m.focus == focusSidebar && name == m.config.MachineName {
+			return m.startRename()
+		}
 	case msg.String() == "f":
 		m.filter = (m.filter + 1) % 4
 		m.applyFilter()
@@ -418,7 +453,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				store.Delete(projectDir, tmpl)
 				// Rebuild sidebar
 				m.templates, _ = store.ListAll()
-				m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+				m.rebuildSidebar()
 				if m.sidebarCursor >= len(m.sidebarItems) {
 					m.sidebarCursor = len(m.sidebarItems) - 1
 				}
@@ -504,7 +539,7 @@ func (m Model) updateNaming(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.syncResult = fmt.Sprintf("template '%s' saved", name)
 			m.templates, _ = store.ListAll()
-			m.sidebarItems = buildSidebarItems(m.sessions, m.templates)
+			m.rebuildSidebar()
 		}
 		return m, nil
 	}
@@ -700,32 +735,33 @@ func (m Model) viewList() string {
 func (m Model) renderSidebar(w, h int) string {
 	var b strings.Builder
 
-	// Title
-	sidebarTitle := "PROJECTS"
-	if m.focus == focusSidebar {
-		sidebarTitle = lipgloss.NewStyle().Bold(true).Foreground(purple2).Render(sidebarTitle)
-	} else {
-		sidebarTitle = lipgloss.NewStyle().Foreground(dimGray).Render(sidebarTitle)
+	header := func(title string) string {
+		if m.focus == focusSidebar {
+			return " " + lipgloss.NewStyle().Bold(true).Foreground(purple2).Render(title)
+		}
+		return " " + lipgloss.NewStyle().Foreground(dimGray).Render(title)
 	}
-	b.WriteString(" " + sidebarTitle + "\n\n")
 
-	lines := 2
-	templatesStarted := false
-
+	lines := 0
+	section := ""
 	for i, item := range m.sidebarItems {
 		if lines >= h-1 {
 			break
 		}
 
-		// Templates section header
-		if item.isTmpl && !templatesStarted {
-			templatesStarted = true
-			b.WriteString("\n")
-			tmplHeader := lipgloss.NewStyle().Foreground(dimGray).Render(" TEMPLATES")
-			if m.focus == focusSidebar {
-				tmplHeader = lipgloss.NewStyle().Foreground(purple2).Render(" TEMPLATES")
+		itemSection := "PROJECTS"
+		if item.isMachine {
+			itemSection = "MACHINES"
+		} else if item.isTmpl {
+			itemSection = "TEMPLATES"
+		}
+		if itemSection != section {
+			if section != "" {
+				b.WriteString("\n")
+				lines++
 			}
-			b.WriteString(tmplHeader + "\n")
+			section = itemSection
+			b.WriteString(header(section) + "\n\n")
 			lines += 2
 		}
 
@@ -736,7 +772,8 @@ func (m Model) renderSidebar(w, h int) string {
 		}
 
 		var line string
-		if selected {
+		switch {
+		case selected:
 			cursor := lipgloss.NewStyle().Foreground(cyan).Bold(true).Render("▸")
 			name := lipgloss.NewStyle().Foreground(white).Bold(true).Render(label)
 			if item.isTmpl {
@@ -745,19 +782,17 @@ func (m Model) renderSidebar(w, h int) string {
 				countStr := lipgloss.NewStyle().Foreground(cyan).Render(fmt.Sprintf(" %d", item.count))
 				line = " " + cursor + " " + name + countStr
 			}
-		} else {
-			if item.isTmpl {
-				name := lipgloss.NewStyle().Foreground(midGray).Render(label)
-				line = "   " + lipgloss.NewStyle().Foreground(purple4).Render("◆") + " " + name
-			} else if item.isAll {
-				name := lipgloss.NewStyle().Foreground(ltGray).Render(label)
-				countStr := lipgloss.NewStyle().Foreground(dimGray).Render(fmt.Sprintf(" %d", item.count))
-				line = "   " + name + countStr
-			} else {
-				name := lipgloss.NewStyle().Foreground(ltGray).Render(label)
-				countStr := lipgloss.NewStyle().Foreground(dimGray).Render(fmt.Sprintf(" %d", item.count))
-				line = "   " + name + countStr
+		case item.isTmpl:
+			name := lipgloss.NewStyle().Foreground(midGray).Render(label)
+			line = "   " + lipgloss.NewStyle().Foreground(purple4).Render("◆") + " " + name
+		default:
+			fg := ltGray
+			if item.isMachine && item.machine == m.scope {
+				fg = green
 			}
+			name := lipgloss.NewStyle().Foreground(fg).Render(label)
+			countStr := lipgloss.NewStyle().Foreground(dimGray).Render(fmt.Sprintf(" %d", item.count))
+			line = "   " + name + countStr
 		}
 
 		b.WriteString(line + "\n")
@@ -771,6 +806,15 @@ func (m Model) renderListPane(w int) string {
 	// If a template is selected in sidebar, show template detail instead
 	if tmpl := m.selectedTemplate(); tmpl != "" {
 		return m.renderTemplatePane(w, tmpl)
+	}
+	switch m.state {
+	case copyView:
+		return m.renderCopyPane(w)
+	case renameView:
+		return m.renderRenamePane(w)
+	}
+	if name, ok := m.selectedMachine(); ok && m.focus == focusSidebar {
+		return m.renderMachinePane(w, name)
 	}
 
 	var b strings.Builder
@@ -902,9 +946,9 @@ func (m Model) renderFilters() string {
 	}
 
 	bar := " " + strings.Join(parts, "  ")
-	if len(m.machines) > 1 || m.allMachines {
-		scope := "⌂ " + m.config.MachineName
-		if m.allMachines {
+	if len(m.machines) > 1 || m.scope != m.config.MachineName {
+		scope := "⌂ " + m.scope
+		if m.scope == "" {
 			scope = fmt.Sprintf("⌂ all %d machines", len(m.machines))
 		}
 		bar += "   " + lipgloss.NewStyle().Foreground(purple2).Render(scope)
@@ -1020,7 +1064,7 @@ func (m Model) renderSessionRow(s index.SessionMeta, selected bool, w int) strin
 			metaParts += "s"
 		}
 	}
-	if m.allMachines {
+	if m.scope != m.config.MachineName {
 		metaParts += "  ⌂ " + s.Machine
 	}
 	line3 := "     " + lipgloss.NewStyle().Foreground(metaFg).Render(metaParts)
@@ -1052,6 +1096,7 @@ func (m Model) renderHelp() string {
 		{"⏎", "detail/spawn"},
 		{"r", "resume"},
 		{"t", "template"},
+		{"c", "copy"},
 		{"/", "search"},
 		{"s", "sync"},
 		{"f", "filter"},
@@ -1130,10 +1175,14 @@ func (m Model) viewDetail() string {
 	}
 	left.WriteString(lbl("Prompts") + val(fmt.Sprintf("%d", s.PromptCount)) + "\n")
 	left.WriteString(lbl("Machine") + val(s.Machine) + "\n")
+	agent := s.Info.Agent
+	if agent == s.Info.Title() {
+		agent = ""
+	}
 	for _, f := range []struct{ label, value string }{
 		{"Branch", s.Info.Branch},
 		{"Worktree", s.Info.Worktree},
-		{"Agent", s.Info.Agent},
+		{"Agent", agent},
 		{"Model", s.Info.Model},
 		{"Claude", s.Info.ClaudeVersion},
 	} {
@@ -1223,7 +1272,7 @@ func (m Model) viewDetail() string {
 }
 
 func (m Model) getSessionPrompts(sessionID string) []index.HistoryEntry {
-	builder := index.NewBuilder(m.config.ClaudeDir, m.config.BackupDir, m.config.MachineName).WithMetaCache(meta.CacheDir())
+	builder := newBuilder(m.config)
 	entries, _ := builder.GetSessionEntries(sessionID)
 	return entries
 }

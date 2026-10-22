@@ -15,6 +15,22 @@ type sidebarItem struct {
 	isTmpl   bool
 	tmplName string
 	count    int
+
+	isMachine bool
+	machine   string // "" for "All machines"
+}
+
+// key identifies an item across rebuilds so the cursor can stay on it.
+func (it sidebarItem) key() string {
+	switch {
+	case it.isMachine:
+		return "m:" + it.machine
+	case it.isTmpl:
+		return "t:" + it.tmplName
+	case it.isAll:
+		return "all"
+	}
+	return "p:" + it.label
 }
 
 type paneFocus int
@@ -70,7 +86,7 @@ func (m *Model) sidebarProjectFilter() string {
 		return ""
 	}
 	item := m.sidebarItems[m.sidebarCursor]
-	if item.isAll || item.isTmpl {
+	if item.isAll || item.isTmpl || item.isMachine {
 		return ""
 	}
 	return item.label

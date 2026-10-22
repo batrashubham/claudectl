@@ -3,13 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"slices"
 	"text/tabwriter"
 
-	"github.com/batrashubham/claudectl/internal/config"
-	"github.com/batrashubham/claudectl/internal/index"
-	"github.com/batrashubham/claudectl/internal/sync"
+	"github.com/batrashubham/claudectl/internal/machines"
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 )
 
@@ -21,26 +18,17 @@ var machineCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		counts := make(map[string]int)
-		for _, s := range sessions {
-			if s.FileSize > 0 {
-				counts[s.Machine]++
-			}
-		}
-
-		names := index.Machines(cfg.BackupDir)
-		if !slices.Contains(names, cfg.MachineName) {
-			names = append(names, cfg.MachineName)
-		}
-
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "MACHINE\tSESSIONS\t")
-		for _, n := range names {
-			marker := ""
-			if n == cfg.MachineName {
+		fmt.Fprintln(w, "MACHINE\tSESSIONS\tSIZE\tLAST SYNC\t")
+		for _, s := range machines.Summarize(cfg, sessions) {
+			last, marker := "never", ""
+			if !s.LastSync.IsZero() {
+				last = humanize.Time(s.LastSync)
+			}
+			if s.This {
 				marker = "← this machine"
 			}
-			fmt.Fprintf(w, "%s\t%d\t%s\n", n, counts[n], marker)
+			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", s.Name, s.Sessions, humanize.Bytes(uint64(s.Bytes)), last, marker)
 		}
 		return w.Flush()
 	},
@@ -51,40 +39,11 @@ var machineRenameCmd = &cobra.Command{
 	Short: "Rename this machine (moves its folder in the backup)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		newName := args[0]
-		if err := config.ValidateMachineName(newName); err != nil {
-			return err
-		}
 		oldName := cfg.MachineName
-		if newName == oldName {
-			return nil
-		}
-		oldDir := filepath.Join(config.MachinesDir(cfg.BackupDir), oldName)
-		newDir := filepath.Join(config.MachinesDir(cfg.BackupDir), newName)
-		if _, err := os.Stat(newDir); err == nil {
-			return fmt.Errorf("machine %q already exists in the backup", newName)
-		}
-
-		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir, oldName)
-		unlock, err := engine.Lock()
-		if err != nil {
+		if err := machines.Rename(cfg, args[0]); err != nil {
 			return err
 		}
-		defer unlock()
-
-		if _, err := os.Stat(oldDir); err == nil {
-			if err := os.Rename(oldDir, newDir); err != nil {
-				return fmt.Errorf("move %s: %w", oldDir, err)
-			}
-		}
-		cfg.MachineName = newName
-		if err := config.Save(cfg); err != nil {
-			return fmt.Errorf("save config: %w", err)
-		}
-		if err := engine.Commit(fmt.Sprintf("machine: rename %s → %s", oldName, newName)); err != nil {
-			return err
-		}
-		fmt.Printf("Renamed %s → %s\n", oldName, newName)
+		fmt.Printf("Renamed %s → %s\n", oldName, cfg.MachineName)
 		return nil
 	},
 }

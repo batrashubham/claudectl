@@ -3,12 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"slices"
 
-	"github.com/batrashubham/claudectl/internal/config"
-	"github.com/batrashubham/claudectl/internal/index"
-	"github.com/batrashubham/claudectl/internal/session"
-	"github.com/batrashubham/claudectl/internal/sync"
+	"github.com/batrashubham/claudectl/internal/machines"
 	"github.com/spf13/cobra"
 )
 
@@ -35,76 +31,41 @@ directory differs between machines. The copy then gets a new session ID.
 		if to == "" {
 			to = cfg.MachineName
 		}
-		if err := config.ValidateMachineName(to); err != nil {
-			return err
-		}
 		newProject := ""
 		if copyProject != "" {
 			home, _ := os.UserHomeDir()
 			newProject = expandPath(copyProject, home)
-		}
-		if to == cfg.MachineName && newProject == "" {
-			return fmt.Errorf("nothing to copy: give --to <machine> and/or --project <path>")
 		}
 
 		sessions, err := newBuilder().Build()
 		if err != nil {
 			return err
 		}
-		var target *index.SessionMeta
-		for i := range sessions {
-			if sessions[i].ID == args[0] {
-				target = &sessions[i]
-				break
-			}
-		}
+		target := findSession(sessions, args[0])
 		if target == nil {
 			return fmt.Errorf("session %s not found", args[0])
 		}
 
-		engine := sync.NewEngine(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName)
-		unlock, err := engine.Lock()
+		out, err := machines.Copy(cfg, *target, to, newProject)
 		if err != nil {
 			return err
 		}
-		res, err := session.NewLocator(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).Copy(session.CopyRequest{
-			SessionID:  target.ID,
-			ProjectDir: target.ProjectDir,
-			Project:    target.Project,
-			ToMachine:  to,
-			NewProject: newProject,
-		})
-		if err != nil {
-			unlock()
-			return err
-		}
-		if res.Skipped {
-			unlock()
-			fmt.Printf("%s already has session %s\n", to, res.SessionID)
+		if out.Skipped {
+			fmt.Printf("%s already has session %s\n", to, out.SessionID)
 			return nil
 		}
-		commitErr := engine.Commit(fmt.Sprintf("copy(%s → %s): %s", cfg.MachineName, to, res.SessionID))
-		unlock()
-		if commitErr != nil {
-			return commitErr
+		fmt.Printf("Copied to %s: %s\n", to, out.Path)
+		if out.SessionID != target.ID {
+			fmt.Printf("New session ID: %s (project %s)\n", out.SessionID, out.Project)
 		}
-
-		fmt.Printf("Copied to %s: %s\n", to, res.Path)
-		if res.SessionID != target.ID {
-			fmt.Printf("New session ID: %s (project %s)\n", res.SessionID, res.Project)
-		}
-		if !slices.Contains(index.Machines(cfg.BackupDir), to) {
+		if out.NewMachine {
 			fmt.Printf("Note: no machine named %q has synced yet; it will see this once it uses that machine_name.\n", to)
 		}
-		if to != cfg.MachineName {
-			if cfg.GitPush {
-				if err := engine.GitPush(); err != nil {
-					return err
-				}
-				fmt.Printf("Pushed. On %s, run 'claudectl restore' to pull it.\n", to)
-			} else {
-				fmt.Println("git_push is off; push the backup repo yourself to share it.")
-			}
+		switch {
+		case out.Pushed:
+			fmt.Printf("Pushed. On %s, run 'claudectl restore' to pull it.\n", to)
+		case to != cfg.MachineName:
+			fmt.Println("git_push is off; push the backup repo yourself to share it.")
 		}
 		return nil
 	},

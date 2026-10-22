@@ -47,3 +47,12 @@ func Execute() {
 func newBuilder() *index.Builder {
 	return index.NewBuilder(cfg.ClaudeDir, cfg.BackupDir, cfg.MachineName).WithMetaCache(meta.CacheDir())
 }
+
+func findSession(sessions []index.SessionMeta, id string) *index.SessionMeta {
+	for i := range sessions {
+		if sessions[i].ID == id {
+			return &sessions[i]
+		}
+	}
+	return nil
+}

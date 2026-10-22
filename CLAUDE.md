@@ -22,6 +22,7 @@ internal/
   config/         # TOML config at ~/.claudectl/config.toml
   index/          # Session index: merges history.jsonl + filesystem walk, across machines
   search/         # Full-text transcript search with a size-keyed local cache
+  machines/       # Machine summaries, rename, copy — shared by CLI and TUI
   meta/           # Transcript metadata (titles, branch, model, PRs) with an offset-keyed cache
   update/         # Version resolution and self-update from GitHub releases
   session/        # Locate, restore, resume (syscall.Exec)

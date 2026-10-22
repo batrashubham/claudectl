@@ -140,6 +140,8 @@ This metadata is cached in `~/.claudectl/cache/meta/`; since transcripts only gr
 | `/` | Full-text search across transcripts (all words, any order; `"quote"` for phrases) |
 | `f` | Cycle filter: All → Active → Archive → Ghost |
 | `m` | Toggle this machine / all machines |
+| `c` | Copy session to a machine (pick machine, optionally a new project path) |
+| `R` | Rename this machine (on its sidebar entry) |
 | `s` | Sync now |
 | `g/G` | Jump to top/bottom |
 | `Shift+D` | Usage dashboard (stats, activity, tokens) |
@@ -251,6 +253,8 @@ claudectl machine               # list machines and session counts
 ```
 
 The TUI, `list`, and `search` show this machine's sessions by default. Press `m` in the TUI (or pass `-a`) to see every machine's; each session is labelled with its machine. Resuming another machine's session copies it here first.
+
+In the TUI, the sidebar's **Machines** section lists every machine with its session count. Selecting one shows its backup size and last sync; `⏎` switches the list to that machine's sessions, and `R` on this machine renames it. Press `c` on any session to copy it to another machine (or a new one), optionally under a different project path.
 
 To hand a session to another machine:
 
