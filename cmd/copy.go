@@ -59,7 +59,7 @@ directory differs between machines. The copy then gets a new session ID.
 			fmt.Printf("New session ID: %s (project %s)\n", out.SessionID, out.Project)
 		}
 		if out.NewMachine {
-			fmt.Printf("Note: no machine named %q has synced yet; it will see this once it uses that machine_name.\n", to)
+			fmt.Printf("Note: %q isn't in your local backup yet (run 'claudectl restore' to refresh). It gets this copy once a machine with that name pulls.\n", to)
 		}
 		switch {
 		case out.Pushed:
