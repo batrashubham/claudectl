@@ -171,7 +171,7 @@ func (e *Engine) GitCommit(result *Result) error {
 
 	// Initialize git repo if needed
 	if _, err := os.Stat(filepath.Join(gitDir, ".git")); os.IsNotExist(err) {
-		if err := runGit(gitDir, "init"); err != nil {
+		if err := runGit(gitDir, "init", "-b", "main"); err != nil {
 			return fmt.Errorf("git init: %w", err)
 		}
 		// Safe multi-machine merge: append-only files use union strategy
@@ -203,10 +203,13 @@ func (e *Engine) GitCommit(result *Result) error {
 
 func (e *Engine) GitSetupRemote(remote string) error {
 	gitDir := e.backupDir
+	if err := os.MkdirAll(gitDir, 0755); err != nil {
+		return err
+	}
 
 	// Initialize git repo if needed
 	if _, err := os.Stat(filepath.Join(gitDir, ".git")); os.IsNotExist(err) {
-		if err := runGit(gitDir, "init"); err != nil {
+		if err := runGit(gitDir, "init", "-b", "main"); err != nil {
 			return fmt.Errorf("git init: %w", err)
 		}
 	}
