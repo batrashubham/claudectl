@@ -87,6 +87,8 @@ claudectl cron install   # Alternative: poll on a timer (default: every 5 min)
 claudectl cron status    # Check if cron is active
 claudectl cron remove    # Remove from crontab
 claudectl config         # Show current configuration
+claudectl version        # Print the installed version
+claudectl update         # Update to the latest release (--check to only check)
 claudectl setup          # Re-run onboarding wizard
 ```
 
