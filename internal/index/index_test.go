@@ -306,3 +306,32 @@ func TestBuild_AttachesTitleFromBestCopy(t *testing.T) {
 		t.Errorf("path %s label %q", sessions[0].Path, sessions[0].Label())
 	}
 }
+
+func TestBuild_DesktopSessionPromptsFromTranscript(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudeDir := filepath.Join(tmpDir, "claude")
+	projDir := filepath.Join(claudeDir, "projects", "-p")
+	if err := os.MkdirAll(projDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"user","message":{"role":"user","content":"first ask"},"uuid":"u1","cwd":"/p","timestamp":"2026-10-30T06:00:00Z"}
+{"type":"user","message":{"role":"user","content":"second ask"},"uuid":"u2","timestamp":"2026-10-30T06:01:00Z"}
+{"type":"user","message":{"role":"user","content":"first ask"},"uuid":"u1","timestamp":"2026-10-30T06:00:00Z"}
+`
+	if err := os.WriteFile(filepath.Join(projDir, "desk.jsonl"), []byte(transcript), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	builder := NewBuilder(claudeDir, filepath.Join(tmpDir, "backup"), "this")
+	sessions, err := builder.Build()
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions %v err %v", sessions, err)
+	}
+	if s := sessions[0]; s.PromptCount != 2 || s.FirstPrompt != "first ask" {
+		t.Errorf("got count %d first %q", s.PromptCount, s.FirstPrompt)
+	}
+	entries, _ := builder.GetSessionEntries("desk")
+	if len(entries) != 2 || entries[1].Display != "second ask" {
+		t.Errorf("entries %+v", entries)
+	}
+}

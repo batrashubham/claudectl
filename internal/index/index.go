@@ -96,6 +96,10 @@ func (b *Builder) Build() ([]SessionMeta, error) {
 		if s.Path != "" {
 			s.Info = meta.Read(s.Path, s.ID, b.metaCache)
 		}
+		if s.PromptCount == 0 && s.Info.Prompts > 0 {
+			s.PromptCount = s.Info.Prompts
+			s.FirstPrompt = truncate(s.Info.FirstPrompt, 80)
+		}
 		result = append(result, *s)
 	}
 
@@ -312,8 +316,31 @@ func (b *Builder) GetSessionEntries(sessionID string) ([]HistoryEntry, error) {
 		}
 		f.Close()
 	}
+	if len(entries) == 0 {
+		entries = b.transcriptEntries(sessionID)
+	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Timestamp < entries[j].Timestamp })
 	return entries, nil
+}
+
+// transcriptEntries reads prompts from the transcript, for sessions that never
+// wrote to history.jsonl (the Claude Desktop app).
+func (b *Builder) transcriptEntries(sessionID string) []HistoryEntry {
+	for _, src := range b.sources() {
+		matches, _ := filepath.Glob(filepath.Join(src.dir, "projects", "*", sessionID+".jsonl"))
+		if len(matches) == 0 {
+			continue
+		}
+		var entries []HistoryEntry
+		for _, p := range meta.ReadPrompts(matches[0]) {
+			if p.IsCommand() {
+				continue
+			}
+			entries = append(entries, HistoryEntry{Display: p.Text, Timestamp: p.Time.UnixMilli(), SessionID: sessionID})
+		}
+		return entries
+	}
+	return nil
 }
 
 // firstCwd reads the project path a session started in, for sessions with no

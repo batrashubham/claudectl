@@ -27,6 +27,8 @@ type Info struct {
 	Worktree      string `json:"worktree,omitempty"`
 	Agent         string `json:"agent,omitempty"`
 	PRs           []PR   `json:"prs,omitempty"`
+	Prompts       int    `json:"prompts,omitempty"`
+	FirstPrompt   string `json:"firstPrompt,omitempty"`
 }
 
 // CacheDir is where metadata is cached between runs.
@@ -46,10 +48,14 @@ func (i Info) Title() string {
 // cacheEntry records how far into the transcript Info has been computed.
 // Transcripts are append-only, so only bytes past Offset need reading.
 type cacheEntry struct {
-	Size   int64 `json:"size"`
-	Offset int64 `json:"offset"`
-	Info   Info  `json:"info"`
+	Version   int      `json:"v"`
+	Size      int64    `json:"size"`
+	Offset    int64    `json:"offset"`
+	Info      Info     `json:"info"`
+	PromptIDs []string `json:"promptIds,omitempty"`
 }
+
+const cacheVersion = 2
 
 // Read returns metadata for the transcript at path. With a cacheDir it reads
 // only what was appended since the last call.
@@ -66,11 +72,11 @@ func Read(path, id, cacheDir string) Info {
 		if data, err := os.ReadFile(cachePath); err == nil {
 			json.Unmarshal(data, &c)
 		}
+		if c.Version != cacheVersion || c.Offset > st.Size() {
+			c = cacheEntry{}
+		}
 		if c.Size == st.Size() {
 			return c.Info
-		}
-		if c.Offset > st.Size() {
-			c = cacheEntry{}
 		}
 	}
 
@@ -82,8 +88,17 @@ func Read(path, id, cacheDir string) Info {
 	if _, err := f.Seek(c.Offset, io.SeekStart); err != nil {
 		return c.Info
 	}
-	c.Offset += scan(f, &c.Info)
+	seen := make(map[string]bool, len(c.PromptIDs))
+	for _, id := range c.PromptIDs {
+		seen[id] = true
+	}
+	c.Offset += scan(f, &c.Info, seen)
 	c.Size = st.Size()
+	c.Version = cacheVersion
+	c.PromptIDs = c.PromptIDs[:0]
+	for id := range seen {
+		c.PromptIDs = append(c.PromptIDs, id)
+	}
 
 	if cachePath != "" {
 		if data, err := json.Marshal(c); err == nil {
@@ -104,7 +119,7 @@ var (
 
 // scan applies every complete line in r to info and returns the bytes
 // consumed. A trailing partial line (still being written) is left for later.
-func scan(r io.Reader, info *Info) int64 {
+func scan(r io.Reader, info *Info, seen map[string]bool) int64 {
 	br := bufio.NewReaderSize(r, 256*1024)
 	var consumed int64
 	for {
@@ -113,11 +128,11 @@ func scan(r io.Reader, info *Info) int64 {
 			return consumed
 		}
 		consumed += int64(len(line))
-		apply(line, info)
+		apply(line, info, seen)
 	}
 }
 
-func apply(line []byte, info *Info) {
+func apply(line []byte, info *Info, seen map[string]bool) {
 	// Conversation lines can be megabytes; pull the few header fields with a
 	// byte search instead of decoding the whole entry.
 	if bytes.Contains(line, typeUser) || bytes.Contains(line, typeAssistant) {
@@ -133,6 +148,13 @@ func apply(line []byte, info *Info) {
 		if bytes.Contains(line, typeAssistant) {
 			if v := field(line, keyModel, false); v != "" && v != "<synthetic>" {
 				info.Model = v
+			}
+		}
+		if p, ok := userPrompt(line); ok && !seen[p.UUID] {
+			seen[p.UUID] = true
+			info.Prompts++
+			if info.FirstPrompt == "" && !p.IsCommand() {
+				info.FirstPrompt = truncRunes(p.Text, firstPromptLen)
 			}
 		}
 		return
@@ -175,6 +197,14 @@ func apply(line []byte, info *Info) {
 		}
 		info.PRs = append(info.PRs, PR{Number: e.PRNumber, URL: e.PRURL, Repo: e.PRRepository})
 	}
+}
+
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // field returns the string value following key, e.g. `"gitBranch":"main"`.
