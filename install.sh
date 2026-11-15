@@ -24,7 +24,7 @@ esac
 echo "Installing claudectl for ${OS}/${ARCH}..."
 
 # Get latest release tag
-LATEST=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
+LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
 
 if [ -z "$LATEST" ]; then
   echo "Error: Could not determine latest release."
@@ -42,20 +42,19 @@ TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
 echo "Downloading ${URL}..."
-curl -sSL "$URL" -o "${TMPDIR}/${ARCHIVE}"
+curl -fL --progress-bar "$URL" -o "${TMPDIR}/${ARCHIVE}"
 
 # Extract
 tar -xzf "${TMPDIR}/${ARCHIVE}" -C "$TMPDIR"
+chmod +x "${TMPDIR}/${BINARY}"
 
 # Install
 if [ -w "$INSTALL_DIR" ]; then
   mv "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 else
-  echo "Need sudo to install to ${INSTALL_DIR}"
+  echo "Need sudo to install to ${INSTALL_DIR} (enter your password if prompted)"
   sudo mv "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 fi
-
-chmod +x "${INSTALL_DIR}/${BINARY}"
 
 echo ""
 echo "✓ claudectl installed to ${INSTALL_DIR}/${BINARY}"
